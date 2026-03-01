@@ -1,0 +1,19 @@
+{
+  "feature_cols": [
+    "accuracy",
+    "accuracy_variance",
+    "avg_time_correct",
+    "avg_time_wrong",
+    "timed_accuracy_delta",
+    "days_since_last_correct",
+    "cross_topic_error_rate"
+  ],
+  "classes": [
+    "anxiety",
+    "careless",
+    "decay",
+    "knowledge_gap",
+    "misconception",
+    "transfer_failure"
+  ]
+}
