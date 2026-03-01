@@ -1,0 +1,8 @@
+# Secrets - never expose to AI agents
+Frontend/.env
+Frontend/.env.local
+Frontend/.env.*.local
+Backend/.env
+Backend/.env.local
+*.pem
+*.key
