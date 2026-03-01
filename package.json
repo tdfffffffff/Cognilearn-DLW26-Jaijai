@@ -1,0 +1,9 @@
+{
+  "name": "cognilearn",
+  "private": true,
+  "scripts": {
+    "dev": "cd Frontend && npm install && npx vite --host :: --port 8080",
+    "build": "cd Frontend && npm install && npx vite build",
+    "preview": "cd Frontend && npx vite preview"
+  }
+}
