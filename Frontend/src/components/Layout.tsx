@@ -1,10 +1,11 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { Brain, BookOpen, Network, Eye, Mic, Shield, Activity } from "lucide-react";
+import { Brain, BookOpen, Network, Eye, Mic, Shield, Activity, GraduationCap } from "lucide-react";
 import { motion } from "framer-motion";
 
 const navItems = [
   { to: "/", icon: Brain, label: "Cognitive Fingerprint" },
   { to: "/study-brief", icon: BookOpen, label: "Study Brief" },
+  { to: "/quiz-me", icon: GraduationCap, label: "Quiz Me" },
   { to: "/knowledge-graph", icon: Network, label: "Knowledge Graph" },
   { to: "/attention", icon: Eye, label: "Attention Monitor" },
   { to: "/teach-me", icon: Mic, label: "Teach Me" },
