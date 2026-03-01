@@ -32,6 +32,8 @@ A cognitive AI study companion for university students. CogniLearn diagnoses why
 
 The frontend is a React + Vite + TypeScript app using Tailwind CSS, shadcn/ui, and Supabase Auth.
 
+Make sure Node.js is installed
+
 ### 1. Navigate to the frontend directory
 
 ```bash
