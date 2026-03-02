@@ -57,7 +57,7 @@ from .privacy import (
 )
 from .report import generate_daily_report
 from .schemas import StudentDashboard
-from .voice import analyse_voice_session
+from .voice import analyse_voice_session, analyse_understanding, generate_quiz_from_materials, chat_with_tutor, assess_quiz_answer, generate_quiz_questions
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -189,6 +189,89 @@ async def voice_analysis(
 ):
     report = analyse_voice_session(student_id, topic_id, transcript)
     return report.model_dump()
+
+
+@app.post("/voice/analyze-understanding",
+          summary="OpenAI-powered understanding analysis of student speech")
+async def analyze_voice_understanding(
+    transcript: str = Body(..., embed=True, description="Student's spoken transcript"),
+    topic: str = Body(..., embed=True, description="Topic being explained"),
+    materials_context: Optional[str] = Body(None, embed=True, description="Optional uploaded materials for reference"),
+):
+    """Analyse a student's spoken explanation using OpenAI.
+
+    Returns sentence-by-sentence analysis with correct/incorrect/missing parts.
+    """
+    analysis = analyse_understanding(transcript, topic, materials_context)
+    return analysis.model_dump()
+
+
+@app.post("/quiz/generate-from-materials",
+          summary="Generate quiz questions from uploaded study materials")
+async def generate_quiz(
+    topic: str = Body(..., embed=True),
+    materials_text: str = Body(..., embed=True),
+    num_questions: int = Body(5, embed=True),
+):
+    """Generate conceptual quiz questions from uploaded study materials, with source references."""
+    questions = generate_quiz_from_materials(topic, materials_text, num_questions)
+    return {"topic": topic, "questions": questions}
+
+
+@app.post("/chat/tutor",
+          summary="Conversational AI tutor (Ask Mode)")
+async def chat_tutor(
+    message: str = Body(..., embed=True),
+    topic: str = Body(..., embed=True),
+    conversation_history: Optional[list[dict]] = Body(None, embed=True),
+    materials_context: Optional[str] = Body(None, embed=True),
+):
+    """Have a conversation with an AI tutor about a topic."""
+    reply = chat_with_tutor(message, topic, conversation_history, materials_context)
+    return {"reply": reply}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Quiz Mode: Text-based assessment with image support & error classification
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/quiz/generate-questions",
+          summary="Generate text-based quiz questions for a topic")
+async def generate_questions(
+    topic: str = Body(..., embed=True),
+    num_questions: int = Body(5, embed=True),
+    materials_context: Optional[str] = Body(None, embed=True),
+):
+    """Generate AI-powered quiz questions with LaTeX math content."""
+    questions = generate_quiz_questions(topic, num_questions, materials_context)
+    return {"topic": topic, "questions": questions}
+
+
+@app.post("/quiz/assess-answer",
+          summary="Assess student answer and classify errors into 6 cognitive categories")
+async def quiz_assess_answer(
+    question: str = Body(..., embed=True),
+    student_answer: str = Body("", embed=True),
+    topic: str = Body(..., embed=True),
+    image_base64: Optional[str] = Body(None, embed=True),
+    materials_context: Optional[str] = Body(None, embed=True),
+):
+    """Assess a student's quiz answer (text or image of handwritten work).
+
+    Uses OpenAI GPT-4o-mini (with Vision for images) to:
+    - Evaluate correctness
+    - Classify errors into 6 cognitive categories:
+      Conceptual, Procedural, Factual, Metacognitive, Transfer, Application
+    - Return LaTeX-formatted solution and feedback
+    """
+    result = assess_quiz_answer(
+        question=question,
+        student_answer=student_answer,
+        topic=topic,
+        image_base64=image_base64,
+        materials_context=materials_context,
+    )
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

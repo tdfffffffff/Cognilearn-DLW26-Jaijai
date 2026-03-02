@@ -1,0 +1,1217 @@
+import { useState, useRef, useCallback, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import {
+  Mic, MicOff, RotateCcw, ChevronRight, ChevronLeft, CheckCircle2, XCircle,
+  Lightbulb, Eye, EyeOff, BarChart3, AlertTriangle, BookOpen, Trophy,
+  MessageSquare, GraduationCap, Send, Loader2, Volume2, Sparkles,
+} from "lucide-react";
+import {
+  quizQuestions, sampleErrorReport, disciplineConfig,
+  type QuizQuestion, type Discipline, type QuizFormat, type ErrorClassification
+} from "@/data/quizData";
+import {
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell
+} from "recharts";
+import { useTopics } from "@/hooks/use-topics";
+import { chatWithTutor, analyzeVoiceUnderstanding, generateQuizFromMaterials, type VoiceAnalysisResult, type GeneratedQuestion } from "@/lib/api";
+import { getMaterialsForTopic } from "@/data/topicStore";
+
+type QuizState = "select" | "quiz" | "review" | "report";
+type QuizMode = "ask" | "practice";
+
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface UserAnswer {
+  questionId: string;
+  textAnswer: string;
+  audioBlob?: Blob;
+  isCorrect?: boolean;
+  errorTypes: string[];
+  timeSpent: number;
+}
+
+// SpeechRecognition shim
+interface ISpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onresult: ((event: any) => void) | null;
+  onerror: ((event: any) => void) | null;
+  onend: (() => void) | null;
+  onstart: (() => void) | null;
+}
+
+const getSpeechRecognition = (): (new () => ISpeechRecognition) | null => {
+  return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition || null;
+};
+
+const severityColor = (s: string) =>
+  s === "high" ? "text-cognitive-critical" : s === "medium" ? "text-cognitive-risk" : "text-cognitive-good";
+
+const diffBadgeVariant = (d: string) =>
+  d === "hard" ? "destructive" : d === "medium" ? "secondary" : "outline";
+
+export default function QuizMe() {
+  const topics = useTopics();
+  const [quizState, setQuizState] = useState<QuizState>("select");
+  const [quizMode, setQuizMode] = useState<QuizMode>("practice");
+  const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [answers, setAnswers] = useState<UserAnswer[]>([]);
+  const [showAnswer, setShowAnswer] = useState(false);
+  const [showHint, setShowHint] = useState(false);
+  const [textAnswer, setTextAnswer] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [audioURL, setAudioURL] = useState<string | null>(null);
+  const [flipped, setFlipped] = useState(false);
+  const [startTime, setStartTime] = useState(Date.now());
+
+  // Ask Mode state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Practice Mode with voice
+  const [practiceQuestions, setPracticeQuestions] = useState<GeneratedQuestion[]>([]);
+  const [selectedPracticeQ, setSelectedPracticeQ] = useState<number | null>(null);
+  const [practiceVoiceTranscript, setPracticeVoiceTranscript] = useState("");
+  const [practiceAnalysis, setPracticeAnalysis] = useState<VoiceAnalysisResult | null>(null);
+  const [practiceLoading, setPracticeLoading] = useState(false);
+  const [generatingQuestions, setGeneratingQuestions] = useState(false);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const recognitionRef = useRef<ISpeechRecognition | null>(null);
+
+  // Map topics to quiz disciplines dynamically
+  const topicToDisciplineMap: Record<string, string> = {};
+  topics.forEach((t) => {
+    topicToDisciplineMap[t.id] = t.topic;
+  });
+
+  const filteredQuestions = quizQuestions.filter(
+    (q) => selectedTopicIds.length === 0 || selectedTopicIds.some((id) => {
+      const topicName = topics.find((t) => t.id === id)?.topic || "";
+      return q.topic.toLowerCase().includes(topicName.toLowerCase()) ||
+             topicName.toLowerCase().includes(q.topic.toLowerCase().split(" ")[0]);
+    })
+  );
+  const currentQuestion = filteredQuestions[currentIndex];
+  const progress = filteredQuestions.length > 0 ? ((currentIndex + 1) / filteredQuestions.length) * 100 : 0;
+
+  const toggleTopic = (id: string) => {
+    setSelectedTopicIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const startQuiz = () => {
+    setCurrentIndex(0);
+    setAnswers([]);
+    setChatMessages([]);
+    setPracticeQuestions([]);
+    setSelectedPracticeQ(null);
+    setPracticeAnalysis(null);
+
+    if (quizMode === "ask") {
+      setQuizState("quiz");
+      const topicName = topics.find((t) => selectedTopicIds.includes(t.id))?.topic || "your selected topics";
+      setChatMessages([{
+        role: "assistant",
+        content: `Hi! I'm your AI tutor. Ask me anything about **${topicName}**. You can type or use the microphone to speak! 🎙️`,
+      }]);
+    } else {
+      // Practice mode: generate questions from materials or use default
+      setQuizState("quiz");
+      generatePracticeQuestions();
+    }
+  };
+
+  const generatePracticeQuestions = async () => {
+    setGeneratingQuestions(true);
+    const selectedTopic = topics.find((t) => selectedTopicIds.includes(t.id));
+    if (!selectedTopic) {
+      setGeneratingQuestions(false);
+      return;
+    }
+
+    const materials = getMaterialsForTopic(selectedTopic.id);
+    if (materials) {
+      try {
+        const result = await generateQuizFromMaterials(selectedTopic.topic, materials, 5);
+        setPracticeQuestions(result.questions);
+      } catch {
+        // Fallback to conceptual questions
+        setPracticeQuestions([
+          { question: `Explain the core principles of ${selectedTopic.topic}`, answer: "", difficulty: "medium", source_reference: "", related_concepts: [], hints: [] },
+          { question: `What are the most common mistakes students make in ${selectedTopic.topic}?`, answer: "", difficulty: "medium", source_reference: "", related_concepts: [], hints: [] },
+          { question: `How does ${selectedTopic.topic} connect to other subjects you're studying?`, answer: "", difficulty: "hard", source_reference: "", related_concepts: [], hints: [] },
+        ]);
+      }
+    } else {
+      setPracticeQuestions([
+        { question: `Explain the core principles of ${selectedTopic.topic}`, answer: "", difficulty: "medium", source_reference: "", related_concepts: [], hints: [] },
+        { question: `What are the most common mistakes students make in ${selectedTopic.topic}?`, answer: "", difficulty: "medium", source_reference: "", related_concepts: [], hints: [] },
+        { question: `How does ${selectedTopic.topic} connect to other subjects you're studying?`, answer: "", difficulty: "hard", source_reference: "", related_concepts: [], hints: [] },
+        { question: `Describe a real-world application of ${selectedTopic.topic}`, answer: "", difficulty: "easy", source_reference: "", related_concepts: [], hints: [] },
+      ]);
+    }
+    setGeneratingQuestions(false);
+  };
+
+  // ── Ask Mode: Send message ──
+  const sendChatMessage = async (text?: string) => {
+    const msg = text || chatInput.trim();
+    if (!msg || chatLoading) return;
+
+    const topicName = topics.find((t) => selectedTopicIds.includes(t.id))?.topic || "general";
+    const materials = selectedTopicIds.length > 0 ? getMaterialsForTopic(selectedTopicIds[0]) : "";
+
+    setChatMessages((prev) => [...prev, { role: "user", content: msg }]);
+    setChatInput("");
+    setChatLoading(true);
+
+    try {
+      const history = chatMessages.map((m) => ({ role: m.role, content: m.content }));
+      const reply = await chatWithTutor(msg, topicName, history, materials || undefined);
+      setChatMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+    } catch (err: any) {
+      setChatMessages((prev) => [...prev, { role: "assistant", content: `Sorry, something went wrong: ${err.message}` }]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  // ── Ask Mode: Voice input ──
+  const startVoiceChat = () => {
+    const SR = getSpeechRecognition();
+    if (!SR) return;
+
+    const recognition = new SR();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+
+    recognition.onresult = (event: any) => {
+      const text = event.results[0][0].transcript;
+      sendChatMessage(text);
+    };
+    recognition.onerror = () => setIsRecording(false);
+    recognition.onend = () => setIsRecording(false);
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsRecording(true);
+  };
+
+  const stopVoiceChat = () => {
+    recognitionRef.current?.stop();
+    setIsRecording(false);
+  };
+
+  // ── Ask Mode: Text-to-Speech ──
+  const speakText = (text: string) => {
+    if (isSpeaking) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.9;
+    utterance.onend = () => setIsSpeaking(false);
+    setIsSpeaking(true);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // ── Practice Mode: Voice-to-text answer ──
+  const startPracticeVoice = () => {
+    const SR = getSpeechRecognition();
+    if (!SR) return;
+
+    setPracticeVoiceTranscript("");
+    setPracticeAnalysis(null);
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+
+    let finalText = "";
+    recognition.onresult = (event: any) => {
+      let interim = "";
+      let final = "";
+      for (let i = 0; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          final += event.results[i][0].transcript + " ";
+        } else {
+          interim += event.results[i][0].transcript;
+        }
+      }
+      if (final) finalText = final.trim();
+      setPracticeVoiceTranscript(finalText + (interim ? " " + interim : ""));
+    };
+    recognition.onerror = () => setIsRecording(false);
+    recognition.onend = () => setIsRecording(false);
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsRecording(true);
+  };
+
+  const stopPracticeVoice = async () => {
+    recognitionRef.current?.stop();
+    setIsRecording(false);
+
+    if (!practiceVoiceTranscript.trim()) return;
+
+    setPracticeLoading(true);
+    try {
+      const topicName = topics.find((t) => selectedTopicIds.includes(t.id))?.topic || "";
+      const materials = selectedTopicIds.length > 0 ? getMaterialsForTopic(selectedTopicIds[0]) : "";
+      const result = await analyzeVoiceUnderstanding(
+        practiceVoiceTranscript,
+        topicName,
+        materials || undefined,
+      );
+      setPracticeAnalysis(result);
+    } catch (err: any) {
+      console.error("Analysis failed:", err);
+    } finally {
+      setPracticeLoading(false);
+    }
+  };
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        setAudioURL(URL.createObjectURL(blob));
+        stream.getTracks().forEach((t) => t.stop());
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch {
+      console.error("Microphone access denied");
+    }
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    mediaRecorderRef.current?.stop();
+    setIsRecording(false);
+  }, []);
+
+  const submitAnswer = (selfMarked?: boolean) => {
+    const timeSpent = Math.round((Date.now() - startTime) / 1000);
+    const newAnswer: UserAnswer = {
+      questionId: currentQuestion.id,
+      textAnswer,
+      isCorrect: selfMarked,
+      errorTypes: selfMarked === false ? [currentQuestion.commonErrors[0] || "Conceptual"] : [],
+      timeSpent,
+    };
+    setAnswers((prev) => [...prev, newAnswer]);
+
+    if (currentIndex < filteredQuestions.length - 1) {
+      setCurrentIndex((i) => i + 1);
+      resetQuestionState();
+    } else {
+      setQuizState("report");
+    }
+  };
+
+  const resetQuestionState = () => {
+    setTextAnswer("");
+    setShowAnswer(false);
+    setShowHint(false);
+    setAudioURL(null);
+    setFlipped(false);
+    setStartTime(Date.now());
+  };
+
+  // ── SELECT SCREEN ──
+  if (quizState === "select") {
+    return (
+      <div className="space-y-8 max-w-4xl mx-auto">
+        <div>
+          <h1 className="text-3xl font-bold text-gradient-primary mb-2">Quiz Me</h1>
+          <p className="text-muted-foreground">
+            Choose a mode and your topics to begin learning.
+          </p>
+        </div>
+
+        {/* Mode Selection */}
+        <Card className="glass border-border/50">
+          <CardHeader>
+            <CardTitle className="text-lg">Choose Mode</CardTitle>
+            <CardDescription>Select how you want to study</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <button
+                onClick={() => setQuizMode("ask")}
+                className={`p-6 rounded-lg border text-left transition-all duration-200 ${
+                  quizMode === "ask"
+                    ? "border-primary bg-primary/10 glow-primary"
+                    : "border-border/50 bg-card/50 hover:border-primary/40"
+                }`}
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="p-2 rounded-lg bg-primary/10">
+                    <MessageSquare className="w-6 h-6 text-primary" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-foreground">Ask Mode</div>
+                    <div className="text-xs text-muted-foreground">Conversational</div>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Have a conversation with our AI tutor. Ask questions by typing or speaking, and hear the answers read aloud.
+                </p>
+              </button>
+
+              <button
+                onClick={() => setQuizMode("practice")}
+                className={`p-6 rounded-lg border text-left transition-all duration-200 ${
+                  quizMode === "practice"
+                    ? "border-primary bg-primary/10 glow-primary"
+                    : "border-border/50 bg-card/50 hover:border-primary/40"
+                }`}
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="p-2 rounded-lg bg-cognitive-moderate/10">
+                    <GraduationCap className="w-6 h-6 text-cognitive-moderate" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-foreground">Practice Mode</div>
+                    <div className="text-xs text-muted-foreground">Conceptual Questions</div>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  AI prompts conceptual questions. Select one and use voice-to-text to explain your answer. AI analyses your understanding.
+                </p>
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Topic/Discipline Selection — from Cognitive Fingerprint */}
+        <Card className="glass border-border/50">
+          <CardHeader>
+            <CardTitle className="text-lg">Choose Disciplines</CardTitle>
+            <CardDescription>Topics correspond to your Cognitive Fingerprint folders</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {topics.map((topic) => (
+                <button
+                  key={topic.id}
+                  onClick={() => toggleTopic(topic.id)}
+                  className={`p-4 rounded-lg border text-left transition-all duration-200 ${
+                    selectedTopicIds.includes(topic.id)
+                      ? "border-primary bg-primary/10 glow-primary"
+                      : "border-border/50 bg-card/50 hover:border-primary/40"
+                  }`}
+                >
+                  <div className="text-2xl mb-2">{topic.icon}</div>
+                  <div className="font-medium text-sm text-foreground">{topic.topic}</div>
+                  <div className="text-xs text-muted-foreground mt-1">{topic.mastery}% mastery</div>
+                  <div className="w-full h-1 rounded-full bg-muted mt-2">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all"
+                      style={{ width: `${topic.mastery}%` }}
+                    />
+                  </div>
+                  {topic.uploadedMaterials.length > 0 && (
+                    <Badge variant="outline" className="mt-2 text-[10px]">
+                      {topic.uploadedMaterials.length} material{topic.uploadedMaterials.length > 1 ? "s" : ""}
+                    </Badge>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-6 flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                {selectedTopicIds.length} topic{selectedTopicIds.length !== 1 ? "s" : ""} selected · {quizMode === "ask" ? "Ask" : "Practice"} Mode
+              </p>
+              <Button onClick={startQuiz} disabled={selectedTopicIds.length === 0} className="gap-2">
+                Start {quizMode === "ask" ? "Conversation" : "Practice"} <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // ── ASK MODE SCREEN ──
+  if (quizState === "quiz" && quizMode === "ask") {
+    const topicName = topics.find((t) => selectedTopicIds.includes(t.id))?.topic || "your topic";
+    return (
+      <div className="space-y-4 max-w-3xl mx-auto">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gradient-primary">Ask Mode</h1>
+            <p className="text-sm text-muted-foreground mt-1">Conversation with AI tutor about {topicName}</p>
+          </div>
+          <Button variant="outline" onClick={() => { setQuizState("select"); setChatMessages([]); }} className="gap-2">
+            <RotateCcw className="w-4 h-4" /> Back
+          </Button>
+        </div>
+
+        {/* Chat Messages */}
+        <Card className="glass border-border/50">
+          <CardContent className="pt-6">
+            <div className="h-[400px] overflow-y-auto space-y-4 pr-2">
+              {chatMessages.map((msg, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                >
+                  <div className={`max-w-[80%] rounded-xl p-4 ${
+                    msg.role === "user"
+                      ? "bg-primary/10 border border-primary/20"
+                      : "bg-secondary/50 border border-border/50"
+                  }`}>
+                    <p className="text-sm text-foreground whitespace-pre-wrap">{msg.content}</p>
+                    {msg.role === "assistant" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="mt-2 h-6 text-[10px] text-muted-foreground gap-1"
+                        onClick={() => speakText(msg.content)}
+                      >
+                        <Volume2 className="w-3 h-3" /> {isSpeaking ? "Stop" : "Listen"}
+                      </Button>
+                    )}
+                  </div>
+                </motion.div>
+              ))}
+              {chatLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-secondary/50 border border-border/50 rounded-xl p-4">
+                    <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                  </div>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Chat Input */}
+        <Card className="glass border-border/50">
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-center gap-3">
+              <Button
+                variant={isRecording ? "destructive" : "outline"}
+                size="sm"
+                onClick={isRecording ? stopVoiceChat : startVoiceChat}
+                className="gap-2 flex-shrink-0"
+              >
+                {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                {isRecording ? "Stop" : "Speak"}
+              </Button>
+              <Input
+                placeholder="Type your question..."
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && sendChatMessage()}
+                className="flex-1"
+              />
+              <Button
+                size="sm"
+                onClick={() => sendChatMessage()}
+                disabled={!chatInput.trim() || chatLoading}
+                className="gap-2 flex-shrink-0"
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            </div>
+            {isRecording && (
+              <div className="flex items-center gap-2 mt-2">
+                <div className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
+                <span className="text-xs text-destructive font-mono">Listening... speak your question</span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // ── PRACTICE MODE SCREEN ──
+  if (quizState === "quiz" && quizMode === "practice") {
+    const topicName = topics.find((t) => selectedTopicIds.includes(t.id))?.topic || "your topic";
+    return (
+      <div className="space-y-6 max-w-4xl mx-auto">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gradient-primary">Practice Mode</h1>
+            <p className="text-sm text-muted-foreground mt-1">Select a question and explain your answer using voice</p>
+          </div>
+          <Button variant="outline" onClick={() => { setQuizState("select"); setPracticeQuestions([]); setPracticeAnalysis(null); setSelectedPracticeQ(null); }} className="gap-2">
+            <RotateCcw className="w-4 h-4" /> Back
+          </Button>
+        </div>
+
+        {generatingQuestions ? (
+          <Card className="glass border-border/50">
+            <CardContent className="pt-6 flex items-center justify-center gap-3 py-12">
+              <Loader2 className="w-5 h-5 animate-spin text-primary" />
+              <span className="text-sm text-muted-foreground">Generating questions for {topicName}...</span>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            {/* Question Selection */}
+            {selectedPracticeQ === null && (
+              <Card className="glass border-border/50">
+                <CardHeader>
+                  <CardTitle className="text-lg">Choose a Question</CardTitle>
+                  <CardDescription>Select a conceptual question to answer with your voice</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {practiceQuestions.map((q, i) => (
+                    <button
+                      key={i}
+                      onClick={() => { setSelectedPracticeQ(i); setPracticeAnalysis(null); setPracticeVoiceTranscript(""); }}
+                      className="w-full text-left p-4 rounded-lg border border-border/50 hover:border-primary/40 hover:bg-primary/5 transition-all"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                          <span className="text-sm font-bold text-primary">{i + 1}</span>
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-foreground">{q.question}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant={diffBadgeVariant(q.difficulty)} className="text-[10px]">{q.difficulty}</Badge>
+                            {q.source_reference && (
+                              <Badge variant="outline" className="text-[10px] bg-primary/5 text-primary">
+                                From your materials
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                    </button>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Active Question with Voice Answer */}
+            {selectedPracticeQ !== null && (
+              <div className="space-y-6">
+                <Card className="glass border-border/50">
+                  <CardHeader>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[10px]">Question {selectedPracticeQ + 1}</Badge>
+                      <Badge variant={diffBadgeVariant(practiceQuestions[selectedPracticeQ].difficulty)} className="text-[10px]">
+                        {practiceQuestions[selectedPracticeQ].difficulty}
+                      </Badge>
+                    </div>
+                    <CardTitle className="text-xl mt-2">{practiceQuestions[selectedPracticeQ].question}</CardTitle>
+                    {practiceQuestions[selectedPracticeQ].source_reference && (
+                      <div className="mt-2 p-2 rounded bg-primary/5 border border-primary/20">
+                        <p className="text-[10px] text-muted-foreground mb-1">📚 Source from your materials:</p>
+                        <p className="text-xs text-foreground italic">{practiceQuestions[selectedPracticeQ].source_reference}</p>
+                      </div>
+                    )}
+                  </CardHeader>
+                  <CardContent>
+                    {/* Voice Recording Area */}
+                    <div className="flex flex-col items-center py-6">
+                      <motion.button
+                        onClick={isRecording ? stopPracticeVoice : startPracticeVoice}
+                        disabled={practiceLoading}
+                        whileTap={{ scale: 0.95 }}
+                        className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 disabled:opacity-50 ${
+                          isRecording
+                            ? "bg-cognitive-critical/20 border-2 border-cognitive-critical"
+                            : "bg-primary/10 border-2 border-primary/30 hover:border-primary"
+                        }`}
+                      >
+                        {practiceLoading ? (
+                          <Loader2 className="w-6 h-6 text-primary animate-spin" />
+                        ) : isRecording ? (
+                          <MicOff className="w-6 h-6 text-cognitive-critical" />
+                        ) : (
+                          <Mic className="w-6 h-6 text-primary" />
+                        )}
+                      </motion.button>
+                      <p className="text-xs text-muted-foreground mt-3">
+                        {isRecording ? "Recording... click to stop and analyze" : practiceLoading ? "Analyzing your answer..." : "Click to record your explanation"}
+                      </p>
+                      {isRecording && (
+                        <div className="flex gap-1 mt-2">
+                          {[...Array(5)].map((_, i) => (
+                            <motion.div
+                              key={i}
+                              animate={{ scaleY: [1, 1.5 + Math.random() * 1.5, 1] }}
+                              transition={{ duration: 0.5, repeat: Infinity, delay: i * 0.1 }}
+                              className="w-1 h-4 rounded-full bg-primary"
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Live transcript */}
+                    {practiceVoiceTranscript && (
+                      <div className="p-3 rounded-lg bg-card border border-border mt-2">
+                        <p className="text-xs text-muted-foreground mb-1">Your answer:</p>
+                        <p className="text-sm text-foreground">{practiceVoiceTranscript}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Analysis Result */}
+                {practiceAnalysis && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-4"
+                  >
+                    <Card className="glass border-border/50">
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <Sparkles className="w-5 h-5 text-primary" /> AI Analysis
+                          </CardTitle>
+                          <span className={`text-3xl font-bold ${
+                            practiceAnalysis.overall_accuracy >= 80 ? "text-cognitive-good" :
+                            practiceAnalysis.overall_accuracy >= 50 ? "text-cognitive-moderate" : "text-cognitive-critical"
+                          }`}>
+                            {practiceAnalysis.overall_accuracy}%
+                          </span>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <Progress value={practiceAnalysis.overall_accuracy} className="h-2" />
+                        <p className="text-sm text-muted-foreground">{practiceAnalysis.feedback}</p>
+
+                        {/* Sentence breakdown */}
+                        <div className="space-y-2">
+                          {practiceAnalysis.sentences.map((s, i) => (
+                            <div key={i} className={`p-3 rounded-lg border ${
+                              s.verdict === "correct" ? "bg-cognitive-good/10 border-cognitive-good/30" :
+                              s.verdict === "partially_correct" ? "bg-cognitive-moderate/10 border-cognitive-moderate/30" :
+                              "bg-cognitive-critical/10 border-cognitive-critical/30"
+                            }`}>
+                              <div className="flex items-start gap-2">
+                                {s.verdict === "correct" ? <CheckCircle2 className="w-4 h-4 text-cognitive-good mt-0.5" /> :
+                                 s.verdict === "partially_correct" ? <AlertTriangle className="w-4 h-4 text-cognitive-moderate mt-0.5" /> :
+                                 <XCircle className="w-4 h-4 text-cognitive-critical mt-0.5" />}
+                                <div className="flex-1">
+                                  <p className="text-sm text-foreground italic">&ldquo;{s.original}&rdquo;</p>
+                                  <p className="text-xs text-muted-foreground mt-1">{s.explanation}</p>
+                                  {s.correction && (
+                                    <p className="text-xs text-primary mt-1">Correction: {s.correction}</p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {practiceAnalysis.missing_concepts.length > 0 && (
+                          <div>
+                            <p className="text-xs font-medium text-muted-foreground mb-2">Missing concepts:</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {practiceAnalysis.missing_concepts.map((c, i) => (
+                                <Badge key={i} variant="outline" className="text-[10px] bg-cognitive-moderate/10 text-cognitive-moderate">
+                                  {c}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    <div className="flex gap-3 justify-center">
+                      <Button
+                        variant="outline"
+                        onClick={() => { setPracticeAnalysis(null); setPracticeVoiceTranscript(""); }}
+                        className="gap-2"
+                      >
+                        <Mic className="w-4 h-4" /> Try Again
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => { setSelectedPracticeQ(null); setPracticeAnalysis(null); setPracticeVoiceTranscript(""); }}
+                        className="gap-2"
+                      >
+                        <ChevronLeft className="w-4 h-4" /> Choose Another Question
+                      </Button>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ── REPORT SCREEN ──
+  if (quizState === "report") {
+    const correct = answers.filter((a) => a.isCorrect).length;
+    const total = answers.length;
+    const pct = total > 0 ? Math.round((correct / total) * 100) : 0;
+
+    const radarData = sampleErrorReport.map((e) => ({
+      type: e.type,
+      score: e.percentage,
+      fullMark: 100,
+    }));
+
+    const barData = sampleErrorReport.map((e) => ({
+      name: e.type,
+      count: e.count,
+      severity: e.severity,
+    }));
+
+    const severityBarColor = (severity: string) => {
+      if (severity === "high") return "hsl(var(--cognitive-critical))";
+      if (severity === "medium") return "hsl(var(--cognitive-risk))";
+      return "hsl(var(--cognitive-good))";
+    };
+
+    return (
+      <div className="space-y-8 max-w-5xl mx-auto">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gradient-primary mb-2">Quiz Report</h1>
+            <p className="text-muted-foreground">Error classification summary & improvement areas</p>
+          </div>
+          <Button variant="outline" onClick={() => { setQuizState("select"); setAnswers([]); }} className="gap-2">
+            <RotateCcw className="w-4 h-4" /> New Quiz
+          </Button>
+        </div>
+
+        {/* Score Overview */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card className="glass border-border/50">
+            <CardContent className="pt-6 text-center">
+              <Trophy className="w-8 h-8 text-primary mx-auto mb-2" />
+              <div className="text-4xl font-bold text-foreground">{pct}%</div>
+              <p className="text-sm text-muted-foreground mt-1">{correct}/{total} correct</p>
+            </CardContent>
+          </Card>
+          <Card className="glass border-border/50">
+            <CardContent className="pt-6 text-center">
+              <AlertTriangle className="w-8 h-8 text-cognitive-risk mx-auto mb-2" />
+              <div className="text-4xl font-bold text-foreground">{sampleErrorReport.filter(e => e.severity === "high").length}</div>
+              <p className="text-sm text-muted-foreground mt-1">Critical error types</p>
+            </CardContent>
+          </Card>
+          <Card className="glass border-border/50">
+            <CardContent className="pt-6 text-center">
+              <BookOpen className="w-8 h-8 text-cognitive-good mx-auto mb-2" />
+              <div className="text-4xl font-bold text-foreground">
+                {Math.round(answers.reduce((s, a) => s + a.timeSpent, 0) / 60)}m
+              </div>
+              <p className="text-sm text-muted-foreground mt-1">Total time spent</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Error Classification */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card className="glass border-border/50">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 text-primary" /> Error Type Radar
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={280}>
+                <RadarChart data={radarData}>
+                  <PolarGrid stroke="hsl(var(--border))" />
+                  <PolarAngleAxis dataKey="type" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
+                  <PolarRadiusAxis tick={false} axisLine={false} domain={[0, 100]} />
+                  <Radar dataKey="score" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.25} strokeWidth={2} />
+                </RadarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          <Card className="glass border-border/50">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 text-chart-2" /> Error Distribution
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={barData} layout="vertical">
+                  <XAxis type="number" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
+                  <YAxis dataKey="name" type="category" width={100} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                    labelStyle={{ color: "hsl(var(--foreground))" }}
+                  />
+                  <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                    {barData.map((entry, i) => (
+                      <Cell key={i} fill={severityBarColor(entry.severity)} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Detailed Breakdown */}
+        <Card className="glass border-border/50">
+          <CardHeader>
+            <CardTitle className="text-lg">Detailed Error Breakdown</CardTitle>
+            <CardDescription>Classified by our ML error classifier model</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {sampleErrorReport.map((err) => (
+                <div key={err.type} className="flex items-center gap-4 p-3 rounded-lg bg-secondary/30 border border-border/30">
+                  <div className={`w-2 h-10 rounded-full ${
+                    err.severity === "high" ? "bg-cognitive-critical" : err.severity === "medium" ? "bg-cognitive-risk" : "bg-cognitive-good"
+                  }`} />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm text-foreground">{err.type}</span>
+                      <Badge variant={err.severity === "high" ? "destructive" : "secondary"} className="text-[10px]">
+                        {err.severity}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{err.description}</p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-lg font-bold text-foreground">{err.percentage}%</div>
+                    <div className="text-[10px] text-muted-foreground">{err.count} errors</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Improvement Areas */}
+        <Card className="glass border-border/50">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Lightbulb className="w-5 h-5 text-cognitive-moderate" /> Areas for Improvement
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {answers.filter(a => !a.isCorrect).map((a) => {
+                const q = quizQuestions.find(qq => qq.id === a.questionId);
+                if (!q) return null;
+                return (
+                  <div key={a.questionId} className="p-3 rounded-lg bg-destructive/5 border border-destructive/20">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-sm">{disciplineConfig[q.discipline]?.icon || "📚"}</span>
+                      <span className="font-medium text-sm text-foreground">{q.topic}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Review: {q.relatedConcepts.join(", ")}</p>
+                  </div>
+                );
+              })}
+              {answers.filter(a => !a.isCorrect).length === 0 && (
+                <p className="text-sm text-cognitive-good col-span-2">Perfect score! No areas need immediate review. 🎉</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // ── QUIZ SCREEN ──
+  if (!currentQuestion) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p className="text-muted-foreground">No questions available.</p>
+      </div>
+    );
+  }
+
+  const cfg = disciplineConfig[currentQuestion.discipline] || { label: currentQuestion.discipline, icon: "📚", color: "", formatLabel: "" };
+
+  return (
+    <div className="space-y-6 max-w-4xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gradient-primary">Quiz Me</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Question {currentIndex + 1} of {filteredQuestions.length}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Badge variant="outline" className="gap-1">
+            {cfg.icon} {cfg.label}
+          </Badge>
+          <Badge variant={diffBadgeVariant(currentQuestion.difficulty)}>
+            {currentQuestion.difficulty}
+          </Badge>
+        </div>
+      </div>
+      <Progress value={progress} className="h-1.5" />
+
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={currentQuestion.id}
+          initial={{ opacity: 0, x: 30 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -30 }}
+          transition={{ duration: 0.25 }}
+        >
+          {/* ── FLASHCARD FORMAT ── */}
+          {currentQuestion.format === "flashcard" && (
+            <div className="perspective-1000">
+              <div
+                onClick={() => setFlipped(!flipped)}
+                className="cursor-pointer"
+              >
+                <Card className={`glass border-border/50 min-h-[300px] flex items-center justify-center transition-all duration-500 ${
+                  flipped ? "bg-primary/5" : ""
+                }`}>
+                  <CardContent className="text-center p-8">
+                    {!flipped ? (
+                      <>
+                        <Badge variant="outline" className="mb-4">FRONT</Badge>
+                        <p className="text-xl font-medium text-foreground leading-relaxed">{currentQuestion.question}</p>
+                        <p className="text-xs text-muted-foreground mt-6">Click to flip</p>
+                      </>
+                    ) : (
+                      <>
+                        <Badge className="mb-4 bg-primary/20 text-primary border-primary/30">ANSWER</Badge>
+                        <p className="text-lg text-foreground leading-relaxed">{currentQuestion.answer}</p>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          )}
+
+          {/* ── WORKING FORMAT (Math) ── */}
+          {currentQuestion.format === "working" && (
+            <Card className="glass border-border/50">
+              <CardHeader>
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge variant="outline" className="text-[10px] font-mono">{currentQuestion.topic}</Badge>
+                </div>
+                <CardTitle className="text-xl leading-relaxed">{currentQuestion.question}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Textarea
+                  placeholder="Show your working here... Write each step clearly."
+                  value={textAnswer}
+                  onChange={(e) => setTextAnswer(e.target.value)}
+                  className="min-h-[150px] font-mono text-sm bg-secondary/30"
+                />
+
+                {/* Voice Recorder */}
+                <VoiceRecorder
+                  isRecording={isRecording}
+                  audioURL={audioURL}
+                  onStart={startRecording}
+                  onStop={stopRecording}
+                />
+
+                {/* Hint */}
+                {currentQuestion.hints && (
+                  <div>
+                    <Button variant="ghost" size="sm" onClick={() => setShowHint(!showHint)} className="gap-2 text-muted-foreground">
+                      <Lightbulb className="w-4 h-4" /> {showHint ? "Hide Hint" : "Show Hint"}
+                    </Button>
+                    {showHint && (
+                      <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="mt-2 p-3 rounded-lg bg-cognitive-moderate/10 border border-cognitive-moderate/20">
+                        {currentQuestion.hints.map((h, i) => (
+                          <p key={i} className="text-sm text-foreground">💡 {h}</p>
+                        ))}
+                      </motion.div>
+                    )}
+                  </div>
+                )}
+
+                {/* Show Answer */}
+                <div>
+                  <Button variant="ghost" size="sm" onClick={() => setShowAnswer(!showAnswer)} className="gap-2 text-muted-foreground">
+                    {showAnswer ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showAnswer ? "Hide Solution" : "Reveal Solution"}
+                  </Button>
+                  {showAnswer && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="mt-2 space-y-2">
+                      <div className="p-4 rounded-lg bg-primary/5 border border-primary/20">
+                        <p className="text-xs font-mono text-muted-foreground mb-2 uppercase tracking-wider">Step-by-step solution</p>
+                        {currentQuestion.steps?.map((step, i) => (
+                          <div key={i} className="flex gap-3 py-1.5">
+                            <span className="text-xs font-mono text-primary w-4 flex-shrink-0">{i + 1}.</span>
+                            <span className="text-sm text-foreground font-mono">{step}</span>
+                          </div>
+                        ))}
+                        <div className="mt-3 pt-3 border-t border-primary/20">
+                          <p className="text-sm font-semibold text-primary font-mono">Answer: {currentQuestion.answer}</p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── OPEN-ENDED FORMAT ── */}
+          {currentQuestion.format === "open-ended" && (
+            <Card className="glass border-border/50">
+              <CardHeader>
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge variant="outline" className="text-[10px] font-mono">{currentQuestion.topic}</Badge>
+                </div>
+                <CardTitle className="text-xl leading-relaxed">{currentQuestion.question}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="p-3 rounded-lg bg-secondary/20 border border-border/30">
+                  <p className="text-xs text-muted-foreground mb-2">📝 Write your answer or use voice recording below</p>
+                  <Textarea
+                    placeholder="Type your response here..."
+                    value={textAnswer}
+                    onChange={(e) => setTextAnswer(e.target.value)}
+                    className="min-h-[120px] bg-transparent border-0 focus-visible:ring-0 p-0 text-sm"
+                  />
+                </div>
+
+                {/* Voice Recorder */}
+                <VoiceRecorder
+                  isRecording={isRecording}
+                  audioURL={audioURL}
+                  onStart={startRecording}
+                  onStop={stopRecording}
+                />
+
+                {currentQuestion.hints && (
+                  <div>
+                    <Button variant="ghost" size="sm" onClick={() => setShowHint(!showHint)} className="gap-2 text-muted-foreground">
+                      <Lightbulb className="w-4 h-4" /> {showHint ? "Hide Hints" : "Show Hints"}
+                    </Button>
+                    {showHint && (
+                      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-2 p-3 rounded-lg bg-cognitive-moderate/10 border border-cognitive-moderate/20 space-y-1">
+                        {currentQuestion.hints.map((h, i) => (
+                          <p key={i} className="text-sm text-foreground">💡 {h}</p>
+                        ))}
+                      </motion.div>
+                    )}
+                  </div>
+                )}
+
+                {/* Model Answer */}
+                <div>
+                  <Button variant="ghost" size="sm" onClick={() => setShowAnswer(!showAnswer)} className="gap-2 text-muted-foreground">
+                    {showAnswer ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showAnswer ? "Hide Model Answer" : "Reveal Model Answer"}
+                  </Button>
+                  {showAnswer && (
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-2 p-4 rounded-lg bg-primary/5 border border-primary/20">
+                      <p className="text-xs font-mono text-muted-foreground mb-2 uppercase tracking-wider">Model Answer</p>
+                      <p className="text-sm text-foreground leading-relaxed">{currentQuestion.answer}</p>
+                      <div className="mt-3 pt-3 border-t border-primary/10">
+                        <p className="text-xs text-muted-foreground">Common errors to avoid:</p>
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {currentQuestion.commonErrors.map((e, i) => (
+                            <Badge key={i} variant="outline" className="text-[10px] border-destructive/30 text-destructive">
+                              {e}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </motion.div>
+      </AnimatePresence>
+
+      {/* Self-Assessment + Navigation */}
+      <Card className="glass border-border/50">
+        <CardContent className="pt-6">
+          <p className="text-sm text-muted-foreground mb-3">How did you do?</p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button onClick={() => submitAnswer(true)} className="gap-2 bg-cognitive-good/20 text-cognitive-good border border-cognitive-good/30 hover:bg-cognitive-good/30">
+              <CheckCircle2 className="w-4 h-4" /> I got it right
+            </Button>
+            <Button onClick={() => submitAnswer(false)} variant="outline" className="gap-2 border-destructive/30 text-cognitive-critical hover:bg-destructive/10">
+              <XCircle className="w-4 h-4" /> I got it wrong
+            </Button>
+            <div className="ml-auto flex gap-2">
+              <Button variant="ghost" size="sm" disabled={currentIndex === 0} onClick={() => { setCurrentIndex(i => i - 1); resetQuestionState(); }}>
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => submitAnswer(undefined)}>
+                Skip <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── Voice Recorder Sub-component ──
+function VoiceRecorder({ isRecording, audioURL, onStart, onStop }: {
+  isRecording: boolean; audioURL: string | null; onStart: () => void; onStop: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-lg bg-secondary/20 border border-border/30">
+      <Button
+        variant={isRecording ? "destructive" : "outline"}
+        size="sm"
+        onClick={isRecording ? onStop : onStart}
+        className="gap-2"
+      >
+        {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+        {isRecording ? "Stop Recording" : "Record Answer"}
+      </Button>
+      {isRecording && (
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
+          <span className="text-xs text-destructive font-mono">Recording...</span>
+        </div>
+      )}
+      {audioURL && !isRecording && (
+        <audio controls src={audioURL} className="h-8 flex-1" />
+      )}
+      <span className="text-xs text-muted-foreground ml-auto">🎙 Voice input</span>
+    </div>
+  );
+}
