@@ -35,6 +35,12 @@ interface DrowsinessMonitorProps {
   config?: Partial<FatigueEngineConfig>;
   /** Compact mode for embedding inline */
   compact?: boolean;
+  /** Automatically request camera and start monitor on mount */
+  autoStart?: boolean;
+  /** Hide controls/metrics UI and run in background */
+  hideUI?: boolean;
+  /** Callback when camera is enabled or disabled by user action */
+  onCameraStateChange?: (enabled: boolean) => void;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -82,6 +88,9 @@ const DrowsinessMonitor: React.FC<DrowsinessMonitorProps> = ({
   debug = false,
   config,
   compact = false,
+  autoStart = false,
+  hideUI = false,
+  onCameraStateChange,
 }) => {
   const [isActive, setIsActive] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -97,6 +106,7 @@ const DrowsinessMonitor: React.FC<DrowsinessMonitorProps> = ({
   const rafRef = useRef<number | null>(null);
   const lastEmitRef = useRef(0);
   const mountedRef = useRef(true);
+  const autoStartAttemptedRef = useRef(false);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -267,6 +277,14 @@ const DrowsinessMonitor: React.FC<DrowsinessMonitorProps> = ({
           setFaceDetected(false);
           const noFace = engineRef.current.noFacePayload();
           setCurrentPayload(noFace);
+
+          // Emit callback every ~5 seconds even when no face is detected,
+          // so upstream timelines remain continuous across page switches.
+          const now = Date.now();
+          if (now - lastEmitRef.current >= 5000) {
+            lastEmitRef.current = now;
+            onFatigueUpdate?.(noFace);
+          }
         }
       });
 
@@ -322,6 +340,7 @@ const DrowsinessMonitor: React.FC<DrowsinessMonitorProps> = ({
 
       rafRef.current = requestAnimationFrame(processFrame);
       setIsActive(true);
+      onCameraStateChange?.(true);
     } catch (err: any) {
       console.error("Camera/FaceMesh init error:", err);
       if (
@@ -334,14 +353,22 @@ const DrowsinessMonitor: React.FC<DrowsinessMonitorProps> = ({
     } finally {
       if (mountedRef.current) setIsInitializing(false);
     }
-  }, [config, debug, onFatigueUpdate, cleanup]);
+  }, [config, debug, onFatigueUpdate, onCameraStateChange, cleanup]);
 
   const disableCamera = useCallback(() => {
     cleanup();
     setIsActive(false);
     setFaceDetected(false);
     setCurrentPayload(null);
-  }, [cleanup]);
+    onCameraStateChange?.(false);
+  }, [cleanup, onCameraStateChange]);
+
+  useEffect(() => {
+    if (!autoStart || autoStartAttemptedRef.current) return;
+    if (isActive || isInitializing) return;
+    autoStartAttemptedRef.current = true;
+    void enableCamera();
+  }, [autoStart, isActive, isInitializing, enableCamera]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Render
@@ -350,6 +377,44 @@ const DrowsinessMonitor: React.FC<DrowsinessMonitorProps> = ({
   const status = currentPayload ? getStatus(currentPayload.fatigueScore) : "ok";
   const cfg = statusConfig[status];
   const StatusIcon = cfg.icon;
+
+  if (hideUI) {
+    return (
+      <>
+        {(isInitializing || isActive) && (
+          <>
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              autoPlay
+              style={{
+                position: "fixed",
+                left: "-9999px",
+                top: "-9999px",
+                width: "640px",
+                height: "480px",
+                pointerEvents: "none",
+              }}
+            />
+            <canvas
+              ref={canvasRef}
+              width={640}
+              height={480}
+              style={{
+                position: "fixed",
+                left: "-9999px",
+                top: "-9999px",
+                width: "640px",
+                height: "480px",
+                pointerEvents: "none",
+              }}
+            />
+          </>
+        )}
+      </>
+    );
+  }
 
   if (compact) {
     return (

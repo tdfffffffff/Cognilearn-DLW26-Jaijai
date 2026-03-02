@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   XAxis,
@@ -23,16 +23,16 @@ import { Button } from "@/components/ui/button";
 import DrowsinessMonitor from "@/components/DrowsinessMonitor";
 import FatigueAlert from "@/components/FatigueAlert";
 import { useWorkBreakCoach } from "@/context/WorkBreakCoachContext";
-import type { FatiguePayload } from "@/lib/fatigueEngine";
+import { useFatigueStream } from "@/context/FatigueStreamContext";
 
-// ── History point for charts ──
-interface DataPoint {
-  time: string;
-  ear: number;
-  fatigue: number;
+function formatElapsed(sec: number): string {
+  const totalSec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m ${s}s`;
 }
-
-const MAX_HISTORY = 60; // keep last 60 points ~5 min at 5s interval
 
 // ── State label / colour helpers ──
 const stateLabel: Record<string, string> = {
@@ -60,47 +60,28 @@ const stateBg: Record<string, string> = {
 };
 
 const AttentionMonitor = () => {
-  const { snapshot, handleFatigueUpdate, resetProfile } = useWorkBreakCoach();
+  const { snapshot, resetProfile } = useWorkBreakCoach();
+  const { livePayload, history, sessionStartTs, handleMonitorUpdate, cameraEnabled, setCameraEnabled } = useFatigueStream();
 
-  // Live metrics from camera
-  const [livePayload, setLivePayload] = useState<FatiguePayload | null>(null);
-
-  // Timeline history for charts
-  const [history, setHistory] = useState<DataPoint[]>([]);
-  const seqRef = useRef(0);
-
-  // Session start
-  const sessionStart = useRef(Date.now());
   const elapsed = () => {
-    const s = Math.floor((Date.now() - sessionStart.current) / 1000);
-    const m = Math.floor(s / 60);
-    const h = Math.floor(m / 60);
-    return h > 0 ? `${h}h ${m % 60}m` : `${m}m ${s % 60}s`;
+    if (!sessionStartTs) return "0m 0s";
+    const s = Math.floor((Date.now() - sessionStartTs) / 1000);
+    return formatElapsed(s);
   };
 
-  // Camera callback → feeds both local state & coach
-  const onFatigueUpdate = useCallback(
-    (p: FatiguePayload) => {
-      setLivePayload(p);
-      handleFatigueUpdate(p);
+  const peakFatiguePoint =
+    history.length > 0
+      ? history.reduce((max, point) =>
+          point.fatigue > max.fatigue ? point : max,
+        )
+      : null;
 
-      seqRef.current += 1;
-      const now = new Date();
-      const stamp = `${now.getHours().toString().padStart(2, "0")}:${now
-        .getMinutes()
-        .toString()
-        .padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
-
-      setHistory((prev) => {
-        const next = [
-          ...prev,
-          { time: stamp, ear: +p.ear.toFixed(3), fatigue: +(p.fatigueScore * 100).toFixed(1) },
-        ];
-        return next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next;
-      });
-    },
-    [handleFatigueUpdate],
-  );
+  const lowestFatiguePoint =
+    history.length > 0
+      ? history.reduce((min, point) =>
+          point.fatigue < min.fatigue ? point : min,
+        )
+      : null;
 
   // ── Derived values ──
   const ear = livePayload?.ear ?? 0;
@@ -223,8 +204,14 @@ const AttentionMonitor = () => {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
+          className="glass rounded-xl p-6"
         >
-          <DrowsinessMonitor onFatigueUpdate={onFatigueUpdate} debug={false} />
+          <DrowsinessMonitor
+            onFatigueUpdate={handleMonitorUpdate}
+            onCameraStateChange={setCameraEnabled}
+            debug={false}
+            autoStart={cameraEnabled}
+          />
         </motion.div>
 
         {/* Live Status Cards */}
@@ -400,7 +387,8 @@ const AttentionMonitor = () => {
                   stroke="hsl(222,30%,18%)"
                 />
                 <XAxis
-                  dataKey="time"
+                  dataKey="clockTime"
+                  minTickGap={28}
                   tick={{ fill: "hsl(215,20%,55%)", fontSize: 10 }}
                 />
                 <YAxis
@@ -408,12 +396,23 @@ const AttentionMonitor = () => {
                   tick={{ fill: "hsl(215,20%,55%)", fontSize: 10 }}
                 />
                 <Tooltip
+                  labelFormatter={(label, payload) => {
+                    const point = payload?.[0]?.payload as DataPoint | undefined;
+                    if (!point) return `Time: ${label}`;
+                    return `Time: ${point.clockTime} • Session: ${point.elapsedLabel}`;
+                  }}
+                  formatter={(value: number, name: string) => {
+                    if (name === "ear") return [value.toFixed(3), "EAR"];
+                    return [value, name];
+                  }}
                   contentStyle={{
                     background: "hsl(222,44%,9%)",
                     border: "1px solid hsl(222,30%,18%)",
                     borderRadius: "8px",
                     fontSize: 12,
                   }}
+                  labelStyle={{ color: "hsl(215,20%,75%)" }}
+                  itemStyle={{ color: "hsl(215,20%,88%)" }}
                 />
                 <Area
                   type="monotone"
@@ -480,7 +479,8 @@ const AttentionMonitor = () => {
                   stroke="hsl(222,30%,18%)"
                 />
                 <XAxis
-                  dataKey="time"
+                  dataKey="clockTime"
+                  minTickGap={28}
                   tick={{ fill: "hsl(215,20%,55%)", fontSize: 10 }}
                 />
                 <YAxis
@@ -488,6 +488,15 @@ const AttentionMonitor = () => {
                   tick={{ fill: "hsl(215,20%,55%)", fontSize: 10 }}
                 />
                 <Tooltip
+                  labelFormatter={(label, payload) => {
+                    const point = payload?.[0]?.payload as DataPoint | undefined;
+                    if (!point) return `Time: ${label}`;
+                    return `Time: ${point.clockTime} • Session: ${point.elapsedLabel}`;
+                  }}
+                  formatter={(value: number, name: string) => {
+                    if (name === "fatigue") return [`${Number(value).toFixed(1)}%`, "Fatigue"];
+                    return [value, name];
+                  }}
                   contentStyle={{
                     background: "hsl(222,44%,9%)",
                     border: "1px solid hsl(222,30%,18%)",
@@ -505,6 +514,24 @@ const AttentionMonitor = () => {
                 />
               </AreaChart>
             </ResponsiveContainer>
+            {peakFatiguePoint && lowestFatiguePoint && (
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-md border border-cognitive-risk/30 bg-cognitive-risk/10 p-2">
+                  <p className="text-muted-foreground">Most fatigue</p>
+                  <p className="font-medium text-cognitive-risk">
+                    {peakFatiguePoint.fatigue.toFixed(1)}% at {peakFatiguePoint.clockTime}
+                  </p>
+                  <p className="text-muted-foreground">Session {peakFatiguePoint.elapsedLabel}</p>
+                </div>
+                <div className="rounded-md border border-cognitive-good/30 bg-cognitive-good/10 p-2">
+                  <p className="text-muted-foreground">Least fatigue</p>
+                  <p className="font-medium text-cognitive-good">
+                    {lowestFatiguePoint.fatigue.toFixed(1)}% at {lowestFatiguePoint.clockTime}
+                  </p>
+                  <p className="text-muted-foreground">Session {lowestFatiguePoint.elapsedLabel}</p>
+                </div>
+              </div>
+            )}
           </motion.div>
         </div>
       )}

@@ -6,14 +6,14 @@ import {
 } from "recharts";
 import {
   ArrowDown, ArrowUp, TrendingDown, AlertTriangle, CheckCircle2,
-  FolderOpen, FolderClosed, Upload, FileText, Trash2, ChevronDown,
+  FolderOpen, FolderClosed, Upload, FileText, Trash2, ChevronDown, Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { errorTypeRadar, shapExplanations, forgettingCurveData } from "@/data/mockData";
 import { useTopics } from "@/hooks/use-topics";
 import { useErrorProfile } from "@/hooks/use-error-profile";
-import { addMaterialToTopic, removeMaterialFromTopic, type UploadedMaterial } from "@/data/topicStore";
+import { addMaterialToTopic, removeMaterialFromTopic, addTopic, type UploadedMaterial } from "@/data/topicStore";
 
 const riskColors: Record<string, string> = {
   excellent: "text-cognitive-excellent",
@@ -36,6 +36,9 @@ const CognitiveFingerprint = () => {
   const errorProfile = useErrorProfile();
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [uploadingFor, setUploadingFor] = useState<string | null>(null);
+  const [showAddTopic, setShowAddTopic] = useState(false);
+  const [newTopicName, setNewTopicName] = useState("");
+  const [newTopicIcon, setNewTopicIcon] = useState("📚");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toggleFolder = (topicId: string) => {
@@ -84,6 +87,20 @@ const CognitiveFingerprint = () => {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  const handleAddTopic = () => {
+    if (!newTopicName.trim()) return;
+    addTopic({
+      topic: newTopicName.trim(),
+      icon: newTopicIcon,
+      mastery: 0,
+      errors: 0,
+      riskLevel: "moderate",
+    });
+    setNewTopicName("");
+    setNewTopicIcon("📚");
+    setShowAddTopic(false);
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -124,7 +141,74 @@ const CognitiveFingerprint = () => {
           transition={{ delay: 0.1 }}
           className="glass rounded-xl p-6"
         >
-          <h2 className="text-sm font-semibold text-foreground mb-4">Topic Breakdown</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-foreground">Topic Breakdown</h2>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 h-7 text-xs"
+              onClick={() => setShowAddTopic(!showAddTopic)}
+            >
+              <Plus className="w-3 h-3" />
+              Add Topic
+            </Button>
+          </div>
+
+          {/* Add Topic Form */}
+          <AnimatePresence>
+            {showAddTopic && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="mb-4 overflow-hidden"
+              >
+                <div className="p-4 rounded-lg border border-border bg-card/50 space-y-3">
+                  <div className="flex gap-3">
+                    <input
+                      type="text"
+                      placeholder="Icon (emoji)"
+                      value={newTopicIcon}
+                      onChange={(e) => setNewTopicIcon(e.target.value)}
+                      className="w-16 px-2 py-1.5 text-sm rounded-md bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      maxLength={2}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Topic name (e.g., Physics)"
+                      value={newTopicName}
+                      onChange={(e) => setNewTopicName(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleAddTopic()}
+                      className="flex-1 px-3 py-1.5 text-sm rounded-md bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={handleAddTopic}
+                      disabled={!newTopicName.trim()}
+                      className="text-xs"
+                    >
+                      Add Topic
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setShowAddTopic(false);
+                        setNewTopicName("");
+                        setNewTopicIcon("📚");
+                      }}
+                      className="text-xs"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div className="space-y-2">
             {topics.map((topic) => {
               const isOpen = openFolders.has(topic.id);

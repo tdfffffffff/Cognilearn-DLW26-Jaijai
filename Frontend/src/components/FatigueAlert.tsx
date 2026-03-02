@@ -129,31 +129,35 @@ const FatigueAlert: React.FC = () => {
             </div>
 
             {/* Buttons */}
-            <div className="flex items-center gap-2 p-4 pt-2 border-t border-border/30">
-              <Button
-                size="sm"
-                onClick={startBreak}
-                className="gap-2 flex-1 bg-primary hover:bg-primary/90"
-              >
-                <Coffee className="w-3.5 h-3.5" />
-                Start Break
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={snooze}
-                className="gap-2"
-              >
-                <BellOff className="w-3.5 h-3.5" />
-                Snooze
-              </Button>
+            <div className="flex flex-col gap-2 p-4 pt-2 border-t border-border/30">
+              <p className="text-xs text-center text-muted-foreground mb-1">
+                How long would you like to rest?
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => startBreak(5)}
+                  className="gap-2 flex-1 bg-primary hover:bg-primary/90"
+                >
+                  <Coffee className="w-3.5 h-3.5" />
+                  5 Minutes
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => startBreak(10)}
+                  className="gap-2 flex-1 bg-primary hover:bg-primary/90"
+                >
+                  <Coffee className="w-3.5 h-3.5" />
+                  10 Minutes
+                </Button>
+              </div>
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={dismiss}
-                className="gap-2 text-muted-foreground"
+                className="text-muted-foreground hover:text-foreground w-full"
               >
-                Dismiss
+                I'll keep working
               </Button>
             </div>
           </div>
@@ -162,14 +166,26 @@ const FatigueAlert: React.FC = () => {
 
       {/* ── Break Timer Overlay ── */}
       {showBreakTimer && (
-        <motion.div
-          key="break-timer"
-          initial={{ opacity: 0, y: -20, scale: 0.95 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: -20, scale: 0.95 }}
-          transition={{ type: "spring", damping: 25, stiffness: 300 }}
-          className="fixed top-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)]"
-        >
+        <>
+          {/* Dimming Overlay */}
+          <motion.div
+            key="dim-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
+          />
+
+          {/* Timer Card */}
+          <motion.div
+            key="break-timer"
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            className="fixed top-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)]"
+          >
           <div
             className={`rounded-xl border-2 ${cfg.bg} ${cfg.border} shadow-2xl backdrop-blur-xl overflow-hidden`}
           >
@@ -219,6 +235,7 @@ const FatigueAlert: React.FC = () => {
             </div>
           </div>
         </motion.div>
+        </>
       )}
     </AnimatePresence>
   );

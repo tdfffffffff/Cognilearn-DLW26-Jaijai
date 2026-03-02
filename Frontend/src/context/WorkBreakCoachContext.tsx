@@ -40,8 +40,8 @@ interface WorkBreakCoachContextValue {
   snapshot: CoachSnapshot;
   /** Feed a fatigue update from DrowsinessMonitor */
   handleFatigueUpdate: (payload: FatiguePayload) => void;
-  /** User starts a break */
-  startBreak: () => void;
+  /** User starts a break (with optional custom duration in minutes) */
+  startBreak: (customDurationMin?: number) => void;
   /** User snoozes the alert (cooldown) */
   snooze: () => void;
   /** User dismisses the alert (cooldown + adapt thresholds) */
@@ -106,7 +106,7 @@ export function WorkBreakCoachProvider({ children }: { children: ReactNode }) {
     [coach],
   );
 
-  const startBreak = useCallback(() => coach.startBreak(), [coach]);
+  const startBreak = useCallback((customDurationMin?: number) => coach.startBreak(customDurationMin), [coach]);
   const snooze = useCallback(() => coach.snooze(), [coach]);
   const dismiss = useCallback(() => coach.dismiss(), [coach]);
   const endBreak = useCallback(() => coach.endBreak(), [coach]);

@@ -109,11 +109,15 @@ export class WorkBreakCoach {
   private warnStartTime = 0;       // when fatigue first exceeded warnThreshold
   private breakSuggestTime = 0;    // when fatigue first exceeded breakThreshold
   private criticalStartTime = 0;   // when fatigue first exceeded criticalThreshold
+  private highFatigueStartTime = 0; // when fatigue first exceeded 60% (0.6)
 
   // Alert cooldown
   private lastAlertTime = 0;
   private inCooldown = false;
   private cooldownEndTime = 0;
+  private lastIgnoreTime = 0;      // when user last ignored non-high-fatigue alerts
+  private lastHighFatigueIgnoreTime = 0; // when user specifically ignored high-fatigue alert
+  private _triggeredByHighFatigue = false; // flag: current alert was from 60% sustained check
 
   // Alert state
   private _showAlert = false;
@@ -215,7 +219,40 @@ export class WorkBreakCoach {
       return;
     }
 
-    // Check cooldown
+    // Sustained threshold detection
+    const score = payload.fatigueScore;
+
+    // ═══ HIGH FATIGUE CHECK — runs BEFORE cooldown, never blocked ═══
+    // If fatigue > 60% for ≥ 60 seconds, show break suggestion.
+    // This is the PRIMARY break trigger and is independent of cooldown/dismiss.
+    if (score > 0.60) {
+      if (this.highFatigueStartTime === 0) this.highFatigueStartTime = now;
+      if (now - this.highFatigueStartTime >= 60_000) {
+        // Only respect ignore if user specifically dismissed a high-fatigue alert (5-min window)
+        if (
+          this.lastHighFatigueIgnoreTime > 0 &&
+          now - this.lastHighFatigueIgnoreTime < 5 * 60_000
+        ) {
+          // User specifically ignored high fatigue alert within last 5 min — don't spam
+        } else {
+          // Show friendly break suggestion
+          this.transitionTo("BREAK_SUGGESTED", now);
+          this._alertMessage = `You've been working hard for a while. Let's take a short break to keep your mind fresh! 🌟`;
+          this._showAlert = true;
+          this._triggeredByHighFatigue = true;
+          // Reset timer so it can re-trigger after another 60s if user ignores
+          this.highFatigueStartTime = now;
+          // Clear any existing cooldown so the alert actually shows
+          this.inCooldown = false;
+          this.notify();
+          return;
+        }
+      }
+    } else {
+      this.highFatigueStartTime = 0;
+    }
+
+    // ═══ COOLDOWN — only blocks WARN / BREAK / CRITICAL (not high fatigue above) ═══
     if (this.inCooldown && now < this.cooldownEndTime) {
       // Still in cooldown — don't show alerts but keep tracking
       this._showAlert = false;
@@ -233,12 +270,10 @@ export class WorkBreakCoach {
       this.transitionTo("BREAK_SUGGESTED", now);
       this._alertMessage = `You've been studying for ${Math.round(focusElapsedMin)} minutes. Time for a ${this.computeSuggestedBreak()}-minute break!`;
       this._showAlert = true;
+      this._triggeredByHighFatigue = false;
       this.notify();
       return;
     }
-
-    // Sustained threshold detection
-    const score = payload.fatigueScore;
 
     // CRITICAL check (≥20s sustained above criticalThreshold)
     if (score > this.profile.criticalThreshold) {
@@ -296,13 +331,16 @@ export class WorkBreakCoach {
   }
 
   /** User clicks "Start Break" */
-  startBreak(): void {
+  startBreak(customDurationMin?: number): void {
     const now = Date.now();
     this.fatigueAtBreakStart = this.latestFatigue;
-    this.breakDurationMs = this.computeSuggestedBreak() * 60_000;
+    const duration = customDurationMin ?? this.computeSuggestedBreak();
+    this.breakDurationMs = duration * 60_000;
     this.breakStartTime = now;
     this.transitionTo("BREAK_ACTIVE", now);
     this._showAlert = false;
+    this._triggeredByHighFatigue = false;
+    this.highFatigueStartTime = 0;
     this.notify();
   }
 
@@ -319,6 +357,14 @@ export class WorkBreakCoach {
   /** User clicks "Dismiss" — increase thresholds + set cooldown */
   dismiss(): void {
     const now = Date.now();
+
+    // Track when user ignores the alert — use separate tracking for high fatigue alerts
+    if (this._triggeredByHighFatigue) {
+      this.lastHighFatigueIgnoreTime = now;
+      this._triggeredByHighFatigue = false;
+    } else {
+      this.lastIgnoreTime = now;
+    }
 
     // Check if dismissed within 5 seconds (quick dismiss → reduce sensitivity)
     if (this.lastAlertTime > 0 && now - this.lastAlertTime < 5000) {
@@ -363,6 +409,8 @@ export class WorkBreakCoach {
     this.warnStartTime = 0;
     this.breakSuggestTime = 0;
     this.criticalStartTime = 0;
+    this.highFatigueStartTime = 0;
+    this._triggeredByHighFatigue = false;
     this.transitionTo("FOCUS", now);
     this._showAlert = false;
     this.notify();
