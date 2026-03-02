@@ -9,7 +9,7 @@ import StudyBrief from "./pages/StudyBrief";
 import QuizMe from "./pages/QuizMe";
 import KnowledgeGraph from "./pages/KnowledgeGraph";
 import AttentionMonitor from "./pages/AttentionMonitor";
-import TeachMeVoice from "./pages/TeachMeVoice";
+// TeachMe is now integrated into QuizMe
 import MyData from "./pages/MyData";
 import NotFound from "./pages/NotFound";
 import Auth from "./pages/Auth";
@@ -39,7 +39,7 @@ function AppRoutes() {
         <Route path="/quiz-me" element={<QuizMe />} />
         <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
         <Route path="/attention" element={<AttentionMonitor />} />
-        <Route path="/teach-me" element={<TeachMeVoice />} />
+        {/* TeachMe is now part of Quiz Me → Practice Mode */}
         <Route path="/my-data" element={<MyData />} />
       </Route>
       <Route path="*" element={<NotFound />} />

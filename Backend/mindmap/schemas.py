@@ -114,6 +114,26 @@ class VoiceGapReport(BaseModel):
     feedback: str
 
 
+class SentenceAnalysis(BaseModel):
+    """Analysis of a single sentence from the student's explanation."""
+    original: str = Field(..., description="The exact sentence the student said")
+    verdict: str = Field(..., description="correct | partially_correct | incorrect")
+    explanation: str = Field(..., description="Why this verdict was given")
+    correction: Optional[str] = Field(None, description="Corrected version if incorrect")
+
+
+class VoiceUnderstandingAnalysis(BaseModel):
+    """Full OpenAI-powered analysis of student's spoken understanding."""
+    topic: str
+    transcript: str
+    sentences: list[SentenceAnalysis]
+    missing_concepts: list[str] = Field(default_factory=list)
+    overall_accuracy: int = Field(..., ge=0, le=100)
+    feedback: str
+    strengths: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Feature 3 — Eye Tracking / Attention
 # ═══════════════════════════════════════════════════════════════════════════════
