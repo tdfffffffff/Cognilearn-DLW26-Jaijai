@@ -1,6 +1,9 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Brain, BookOpen, Network, Eye, Shield, Activity, GraduationCap } from "lucide-react";
 import { motion } from "framer-motion";
+import DrowsinessMonitor from "@/components/DrowsinessMonitor";
+import FatigueAlert from "@/components/FatigueAlert";
+import { useFatigueStream } from "@/context/FatigueStreamContext";
 
 const navItems = [
   { to: "/", icon: Brain, label: "Cognitive Fingerprint" },
@@ -12,8 +15,24 @@ const navItems = [
 ];
 
 const Layout = () => {
+  const location = useLocation();
+  const { handleMonitorUpdate, cameraEnabled, setCameraEnabled } = useFatigueStream();
+  const isAttentionRoute = location.pathname === "/attention";
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
+      {/* Background camera: only mount when camera is enabled AND we're NOT on the Attention page
+          (Attention page renders its own visible monitor) */}
+      {cameraEnabled && !isAttentionRoute && (
+        <DrowsinessMonitor
+          onFatigueUpdate={handleMonitorUpdate}
+          onCameraStateChange={setCameraEnabled}
+          debug={false}
+          autoStart
+          hideUI
+        />
+      )}
+
       {/* Sidebar */}
       <aside className="w-64 flex-shrink-0 border-r border-border bg-sidebar flex flex-col">
         <div className="p-5 border-b border-sidebar-border">
@@ -82,6 +101,9 @@ const Layout = () => {
           <Outlet />
         </motion.div>
       </main>
+
+      {/* Global Fatigue Alert – Shows on all pages */}
+      <FatigueAlert />
     </div>
   );
 };

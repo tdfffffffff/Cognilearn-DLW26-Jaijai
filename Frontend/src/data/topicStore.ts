@@ -62,6 +62,25 @@ export function removeMaterialFromTopic(topicId: string, materialId: string): vo
   listeners.forEach((l) => l());
 }
 
+export function addTopic(topic: Partial<TopicFolder>): void {
+  const newTopic: TopicFolder = {
+    id: topic.id || `topic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    topic: topic.topic || "New Topic",
+    mastery: topic.mastery ?? 0,
+    errors: topic.errors ?? 0,
+    riskLevel: topic.riskLevel || "moderate",
+    icon: topic.icon || "📚",
+    uploadedMaterials: topic.uploadedMaterials || [],
+  };
+  _topics = [..._topics, newTopic];
+  listeners.forEach((l) => l());
+}
+
+export function removeTopic(topicId: string): void {
+  _topics = _topics.filter((t) => t.id !== topicId);
+  listeners.forEach((l) => l());
+}
+
 export function subscribe(listener: Listener): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
