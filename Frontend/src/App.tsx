@@ -14,6 +14,7 @@ import MyData from "./pages/MyData";
 import NotFound from "./pages/NotFound";
 import Auth from "./pages/Auth";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { WorkBreakCoachProvider } from "./context/WorkBreakCoachContext";
 
 const queryClient = new QueryClient();
 
@@ -52,9 +53,11 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <AuthProvider>
-          <AppRoutes />
+          <WorkBreakCoachProvider>
+            <AppRoutes />
+          </WorkBreakCoachProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
