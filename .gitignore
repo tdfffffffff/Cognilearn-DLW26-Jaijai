@@ -1,2 +1,21 @@
 Frontend/.env
 Backend/.env
+
+# Python bytecode cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+Backend/venv/
+venv/
+.venv/
+
+# ML model artefacts (large binary files)
+Model/models/*.pkl
+Model/models/*.csv
+Model/models/*.png
+
+# OS
+.DS_Store
+Thumbs.db
