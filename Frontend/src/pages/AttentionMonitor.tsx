@@ -26,6 +26,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import FatigueAlert from "@/components/FatigueAlert";
+import FatigueInsights from "@/components/FatigueInsights";
 import { useWorkBreakCoach } from "@/context/WorkBreakCoachContext";
 import { useFatigueStream } from "@/context/FatigueStreamContext";
 
@@ -646,6 +647,9 @@ const AttentionMonitor = () => {
           </motion.div>
         </div>
       )}
+
+      {/* ── Fatigue Insights (Daily / Weekly / Time-of-Day / Work-Rest) ── */}
+      <FatigueInsights />
     </div>
   );
 };

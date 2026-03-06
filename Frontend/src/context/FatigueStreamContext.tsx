@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 import { useWorkBreakCoach } from "@/context/WorkBreakCoachContext";
 import type { FatiguePayload } from "@/lib/fatigueEngine";
+import { fatigueAnalytics } from "@/lib/fatigueAnalyticsStore";
 
 export interface FatigueHistoryPoint {
   elapsedSec: number;
@@ -80,6 +81,11 @@ export function FatigueStreamProvider({ children }: { children: ReactNode }) {
 
       setLivePayload(payload);
       handleFatigueUpdate(payload);
+
+      // Record sample for long-term analytics (daily/weekly reports)
+      if (payload.faceDetected) {
+        fatigueAnalytics.recordSample(payload.fatigueScore, payload.ear);
+      }
 
       const now = new Date();
       const clockTime = `${now.getHours().toString().padStart(2, "0")}:${now
