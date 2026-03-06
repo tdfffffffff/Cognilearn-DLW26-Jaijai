@@ -1,7 +1,6 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Brain, BookOpen, Network, Eye, Shield, Activity, GraduationCap } from "lucide-react";
 import { motion } from "framer-motion";
-import DrowsinessMonitor from "@/components/DrowsinessMonitor";
 import FatigueAlert from "@/components/FatigueAlert";
 import { useFatigueStream } from "@/context/FatigueStreamContext";
 
@@ -16,22 +15,10 @@ const navItems = [
 
 const Layout = () => {
   const location = useLocation();
-  const { handleMonitorUpdate, cameraEnabled, setCameraEnabled } = useFatigueStream();
-  const isAttentionRoute = location.pathname === "/attention";
+  const { cameraEnabled, livePayload, faceDetected } = useFatigueStream();
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      {/* Background camera: only mount when camera is enabled AND we're NOT on the Attention page
-          (Attention page renders its own visible monitor) */}
-      {cameraEnabled && !isAttentionRoute && (
-        <DrowsinessMonitor
-          onFatigueUpdate={handleMonitorUpdate}
-          onCameraStateChange={setCameraEnabled}
-          debug={false}
-          autoStart
-          hideUI
-        />
-      )}
 
       {/* Sidebar */}
       <aside className="w-64 flex-shrink-0 border-r border-border bg-sidebar flex flex-col">
@@ -85,6 +72,21 @@ const Layout = () => {
               <div className="w-2 h-2 rounded-full bg-cognitive-excellent animate-pulse-glow" />
               <span className="text-xs text-foreground">All models active</span>
             </div>
+            {cameraEnabled && (
+              <div className="flex items-center gap-2 mt-1.5">
+                <div className={`w-2 h-2 rounded-full animate-pulse-glow ${
+                  (livePayload?.fatigueScore ?? 0) >= 0.7 ? "bg-cognitive-critical" :
+                  (livePayload?.fatigueScore ?? 0) >= 0.4 ? "bg-cognitive-moderate" :
+                  "bg-cognitive-good"
+                }`} />
+                <span className="text-xs text-foreground">
+                  Camera: {!faceDetected ? "No face" :
+                    (livePayload?.fatigueScore ?? 0) >= 0.7 ? "Fatigued" :
+                    (livePayload?.fatigueScore ?? 0) >= 0.4 ? "Tired" :
+                    "Focused"}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </aside>

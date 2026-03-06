@@ -19,6 +19,18 @@ interface FatigueStreamContextValue {
   cameraEnabled: boolean;
   /** Set camera enabled/disabled — persists across page navigation */
   setCameraEnabled: (enabled: boolean) => void;
+  /** Shared MediaStream for video preview on other pages */
+  mediaStream: MediaStream | null;
+  setMediaStream: (stream: MediaStream | null) => void;
+  /** Whether a face is currently detected by the background monitor */
+  faceDetected: boolean;
+  setFaceDetected: (detected: boolean) => void;
+  /** Whether the background monitor is initializing camera/FaceMesh */
+  isMonitorInitializing: boolean;
+  setIsMonitorInitializing: (v: boolean) => void;
+  /** Whether camera permission was denied */
+  permissionDenied: boolean;
+  setPermissionDenied: (denied: boolean) => void;
 }
 
 const MAX_HISTORY = 7200;
@@ -39,6 +51,14 @@ const FatigueStreamContext = createContext<FatigueStreamContextValue>({
   handleMonitorUpdate: () => {},
   cameraEnabled: false,
   setCameraEnabled: () => {},
+  mediaStream: null,
+  setMediaStream: () => {},
+  faceDetected: false,
+  setFaceDetected: () => {},
+  isMonitorInitializing: false,
+  setIsMonitorInitializing: () => {},
+  permissionDenied: false,
+  setPermissionDenied: () => {},
 });
 
 export function FatigueStreamProvider({ children }: { children: ReactNode }) {
@@ -47,6 +67,10 @@ export function FatigueStreamProvider({ children }: { children: ReactNode }) {
   const [history, setHistory] = useState<FatigueHistoryPoint[]>([]);
   const sessionStartRef = useRef<number | null>(null);
   const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
+  const [faceDetected, setFaceDetected] = useState(false);
+  const [isMonitorInitializing, setIsMonitorInitializing] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
 
   const handleMonitorUpdate = useCallback(
     (payload: FatiguePayload) => {
@@ -94,6 +118,14 @@ export function FatigueStreamProvider({ children }: { children: ReactNode }) {
         handleMonitorUpdate,
         cameraEnabled,
         setCameraEnabled,
+        mediaStream,
+        setMediaStream,
+        faceDetected,
+        setFaceDetected,
+        isMonitorInitializing,
+        setIsMonitorInitializing,
+        permissionDenied,
+        setPermissionDenied,
       }}
     >
       {children}

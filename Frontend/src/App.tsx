@@ -16,6 +16,7 @@ import Auth from "./pages/Auth";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { WorkBreakCoachProvider } from "./context/WorkBreakCoachContext";
 import { FatigueStreamProvider } from "./context/FatigueStreamContext";
+import BackgroundFatigueMonitor from "./components/BackgroundFatigueMonitor";
 
 const queryClient = new QueryClient();
 
@@ -58,6 +59,7 @@ const App = () => (
         <AuthProvider>
           <WorkBreakCoachProvider>
             <FatigueStreamProvider>
+              <BackgroundFatigueMonitor />
               <AppRoutes />
             </FatigueStreamProvider>
           </WorkBreakCoachProvider>
