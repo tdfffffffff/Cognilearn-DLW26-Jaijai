@@ -435,6 +435,31 @@ export class WorkBreakCoach {
     this.notify();
   }
 
+  /** Reset the current session (called when camera is disabled).
+   *  Clears focus timer, fatigue history, alert state — but keeps profile. */
+  resetSession(): void {
+    this.state = "FOCUS";
+    this.focusStartTime = Date.now();
+    this.breakStartTime = 0;
+    this.breakDurationMs = 0;
+    this.warnStartTime = 0;
+    this.breakSuggestTime = 0;
+    this.criticalStartTime = 0;
+    this.highFatigueStartTime = 0;
+    this.lastAlertTime = 0;
+    this.inCooldown = false;
+    this.cooldownEndTime = 0;
+    this.lastIgnoreTime = 0;
+    this.lastHighFatigueIgnoreTime = 0;
+    this._triggeredByHighFatigue = false;
+    this._showAlert = false;
+    this._alertMessage = "";
+    this.fatigueHistory = [];
+    this.fatigueAtBreakStart = 0;
+    this.latestFatigue = 0;
+    this.notify();
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Private helpers
   // ═══════════════════════════════════════════════════════════════════════════

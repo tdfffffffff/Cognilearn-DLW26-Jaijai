@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 import { useWorkBreakCoach } from "@/context/WorkBreakCoachContext";
 import type { FatiguePayload } from "@/lib/fatigueEngine";
+import { fatigueAnalytics } from "@/lib/fatigueAnalyticsStore";
 
 export interface FatigueHistoryPoint {
   elapsedSec: number;
@@ -19,6 +20,18 @@ interface FatigueStreamContextValue {
   cameraEnabled: boolean;
   /** Set camera enabled/disabled — persists across page navigation */
   setCameraEnabled: (enabled: boolean) => void;
+  /** Shared MediaStream for video preview on other pages */
+  mediaStream: MediaStream | null;
+  setMediaStream: (stream: MediaStream | null) => void;
+  /** Whether a face is currently detected by the background monitor */
+  faceDetected: boolean;
+  setFaceDetected: (detected: boolean) => void;
+  /** Whether the background monitor is initializing camera/FaceMesh */
+  isMonitorInitializing: boolean;
+  setIsMonitorInitializing: (v: boolean) => void;
+  /** Whether camera permission was denied */
+  permissionDenied: boolean;
+  setPermissionDenied: (denied: boolean) => void;
 }
 
 const MAX_HISTORY = 7200;
@@ -39,14 +52,41 @@ const FatigueStreamContext = createContext<FatigueStreamContextValue>({
   handleMonitorUpdate: () => {},
   cameraEnabled: false,
   setCameraEnabled: () => {},
+  mediaStream: null,
+  setMediaStream: () => {},
+  faceDetected: false,
+  setFaceDetected: () => {},
+  isMonitorInitializing: false,
+  setIsMonitorInitializing: () => {},
+  permissionDenied: false,
+  setPermissionDenied: () => {},
 });
 
 export function FatigueStreamProvider({ children }: { children: ReactNode }) {
-  const { handleFatigueUpdate } = useWorkBreakCoach();
+  const { handleFatigueUpdate, resetSession } = useWorkBreakCoach();
   const [livePayload, setLivePayload] = useState<FatiguePayload | null>(null);
   const [history, setHistory] = useState<FatigueHistoryPoint[]>([]);
   const sessionStartRef = useRef<number | null>(null);
-  const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [cameraEnabled, setCameraEnabledRaw] = useState(false);
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
+  const [faceDetected, setFaceDetected] = useState(false);
+  const [isMonitorInitializing, setIsMonitorInitializing] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
+
+  // Wrap setCameraEnabled: when camera is disabled, reset session data
+  // (history, livePayload, sessionStart). Fatigue insights (fatigueAnalytics) is NOT touched.
+  const setCameraEnabled = useCallback((enabled: boolean) => {
+    setCameraEnabledRaw(enabled);
+    if (!enabled) {
+      // End of study session — clear live session data
+      setLivePayload(null);
+      setHistory([]);
+      sessionStartRef.current = null;
+      setFaceDetected(false);
+      // Reset WorkBreakCoach focus timer & state
+      resetSession();
+    }
+  }, [resetSession]);
 
   const handleMonitorUpdate = useCallback(
     (payload: FatiguePayload) => {
@@ -56,6 +96,11 @@ export function FatigueStreamProvider({ children }: { children: ReactNode }) {
 
       setLivePayload(payload);
       handleFatigueUpdate(payload);
+
+      // Record sample for long-term analytics (daily/weekly reports)
+      if (payload.faceDetected) {
+        fatigueAnalytics.recordSample(payload.fatigueScore, payload.ear);
+      }
 
       const now = new Date();
       const clockTime = `${now.getHours().toString().padStart(2, "0")}:${now
@@ -94,6 +139,14 @@ export function FatigueStreamProvider({ children }: { children: ReactNode }) {
         handleMonitorUpdate,
         cameraEnabled,
         setCameraEnabled,
+        mediaStream,
+        setMediaStream,
+        faceDetected,
+        setFaceDetected,
+        isMonitorInitializing,
+        setIsMonitorInitializing,
+        permissionDenied,
+        setPermissionDenied,
       }}
     >
       {children}

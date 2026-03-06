@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   XAxis,
@@ -12,16 +12,21 @@ import {
 } from "recharts";
 import {
   Eye,
+  EyeOff,
   Activity,
   Clock,
   Settings2,
   Shield,
   Zap,
   RotateCcw,
+  Camera,
+  CameraOff,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import DrowsinessMonitor from "@/components/DrowsinessMonitor";
+import { Badge } from "@/components/ui/badge";
 import FatigueAlert from "@/components/FatigueAlert";
+import FatigueInsights from "@/components/FatigueInsights";
 import { useWorkBreakCoach } from "@/context/WorkBreakCoachContext";
 import { useFatigueStream } from "@/context/FatigueStreamContext";
 
@@ -61,7 +66,28 @@ const stateBg: Record<string, string> = {
 
 const AttentionMonitor = () => {
   const { snapshot, resetProfile } = useWorkBreakCoach();
-  const { livePayload, history, sessionStartTs, handleMonitorUpdate, cameraEnabled, setCameraEnabled } = useFatigueStream();
+  const { livePayload, history, sessionStartTs, cameraEnabled, setCameraEnabled, mediaStream, faceDetected, isMonitorInitializing, permissionDenied } = useFatigueStream();
+
+  // Video preview — shares the BackgroundFatigueMonitor's MediaStream
+  const videoPreviewRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoPreviewRef.current;
+    if (!video) return;
+    if (mediaStream) {
+      video.srcObject = mediaStream;
+      video.play().catch(() => {});
+    } else {
+      video.srcObject = null;
+    }
+  }, [mediaStream]);
+
+  // Camera overlay status config
+  const cameraStatusCfg = (livePayload?.fatigueScore ?? 0) >= 0.7
+    ? { label: "Take a Break", color: "text-cognitive-critical", bg: "bg-cognitive-critical/10 border-cognitive-critical/30", Icon: AlertTriangle }
+    : (livePayload?.fatigueScore ?? 0) >= 0.4
+    ? { label: "Getting Tired", color: "text-cognitive-moderate", bg: "bg-cognitive-moderate/10 border-cognitive-moderate/30", Icon: EyeOff }
+    : { label: "OK \u2014 Focused", color: "text-cognitive-good", bg: "bg-cognitive-good/10 border-cognitive-good/30", Icon: Eye };
 
   const elapsed = () => {
     if (!sessionStartTs) return "0m 0s";
@@ -206,12 +232,98 @@ const AttentionMonitor = () => {
           animate={{ opacity: 1, y: 0 }}
           className="glass rounded-xl p-6"
         >
-          <DrowsinessMonitor
-            onFatigueUpdate={handleMonitorUpdate}
-            onCameraStateChange={setCameraEnabled}
-            debug={false}
-            autoStart={cameraEnabled}
-          />
+          <div className="space-y-4">
+            {/* Camera Controls */}
+            <div className="flex items-center gap-3">
+              {!cameraEnabled && !isMonitorInitializing ? (
+                <Button onClick={() => setCameraEnabled(true)} className="gap-2">
+                  <Camera className="w-4 h-4" />
+                  Enable Camera
+                </Button>
+              ) : isMonitorInitializing ? (
+                <Button disabled className="gap-2">
+                  <Camera className="w-4 h-4" />
+                  Initializing camera...
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => setCameraEnabled(false)}
+                  variant="outline"
+                  className="gap-2 border-destructive/30 text-destructive hover:bg-destructive/10"
+                >
+                  <CameraOff className="w-4 h-4" /> Disable Camera
+                </Button>
+              )}
+
+              {cameraEnabled && !isMonitorInitializing && (
+                <motion.div
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="flex items-center gap-2"
+                >
+                  <div className="w-2 h-2 rounded-full bg-cognitive-good animate-pulse" />
+                  <span className="text-xs text-cognitive-good font-mono">LIVE</span>
+                </motion.div>
+              )}
+            </div>
+
+            {permissionDenied && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="p-3 rounded-lg bg-destructive/10 border border-destructive/30"
+              >
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-destructive" />
+                  <p className="text-sm text-destructive">
+                    Camera permission denied. Please allow camera access in your browser settings and try again.
+                  </p>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Video Preview */}
+            {cameraEnabled && mediaStream && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="relative rounded-xl overflow-hidden border border-border bg-black"
+              >
+                <video
+                  ref={videoPreviewRef}
+                  className="w-full max-h-[300px] object-cover"
+                  playsInline
+                  muted
+                  autoPlay
+                  style={{ transform: "scaleX(-1)" }}
+                />
+
+                {/* Status Overlay */}
+                <div className="absolute top-3 left-3 flex items-center gap-2">
+                  <Badge
+                    variant="outline"
+                    className={`${cameraStatusCfg.bg} ${cameraStatusCfg.color} text-[10px] backdrop-blur-md`}
+                  >
+                    <cameraStatusCfg.Icon className="w-3 h-3 mr-1" />
+                    {cameraStatusCfg.label}
+                  </Badge>
+                </div>
+
+                {/* No face warning */}
+                {!faceDetected && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                    <div className="text-center">
+                      <EyeOff className="w-8 h-8 text-cognitive-moderate mx-auto mb-2" />
+                      <p className="text-sm text-cognitive-moderate">No face detected</p>
+                      <p className="text-xs text-muted-foreground">
+                        Make sure you&apos;re visible to the camera
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </div>
         </motion.div>
 
         {/* Live Status Cards */}
@@ -535,6 +647,9 @@ const AttentionMonitor = () => {
           </motion.div>
         </div>
       )}
+
+      {/* ── Fatigue Insights (Daily / Weekly / Time-of-Day / Work-Rest) ── */}
+      <FatigueInsights />
     </div>
   );
 };

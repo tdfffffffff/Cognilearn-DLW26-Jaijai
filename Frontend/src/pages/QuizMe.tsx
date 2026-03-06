@@ -10,7 +10,7 @@ import {
   Mic, MicOff, RotateCcw, ChevronRight, ChevronLeft, CheckCircle2, XCircle,
   Lightbulb, Eye, EyeOff, BarChart3, AlertTriangle, BookOpen, Trophy,
   MessageSquare, GraduationCap, Send, Loader2, Volume2, Sparkles,
-  VolumeX, ArrowLeft, Camera, Upload, FileText, PenTool,
+  VolumeX, ArrowLeft, Camera, Upload, FileText, PenTool, Zap,
 } from "lucide-react";
 import {
   quizQuestions, sampleErrorReport, disciplineConfig,
@@ -25,9 +25,10 @@ import { chatWithTutor, analyzeVoiceUnderstanding, generateQuizFromMaterials, ge
 import { getMaterialsForTopic } from "@/data/topicStore";
 import { updateErrorProfile } from "@/data/errorProfileStore";
 import { LatexRenderer } from "@/components/LatexRenderer";
+import EmergencyMode from "@/components/EmergencyMode";
 
 type QuizState = "select" | "quiz" | "review" | "report";
-type QuizMode = "ask" | "practice" | "test";
+type QuizMode = "ask" | "practice" | "test" | "emergency";
 /** Practice sub-mode: pick a generated question or free-explain "teach-me" style */
 type PracticeView = "menu" | "question" | "teach";
 
@@ -631,7 +632,7 @@ export default function QuizMe() {
             <CardDescription>Select how you want to study</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <button
                 onClick={() => setQuizMode("ask")}
                 className={`p-6 rounded-lg border text-left transition-all duration-200 ${
@@ -697,6 +698,34 @@ export default function QuizMe() {
                   AI generates questions — answer by typing or photographing your handwritten work. Errors are classified into 6 cognitive categories and update your fingerprint.
                 </p>
               </button>
+
+              <button
+                onClick={() => setQuizMode("emergency")}
+                className={`p-6 rounded-lg border text-left transition-all duration-200 relative overflow-hidden ${
+                  quizMode === "emergency"
+                    ? "border-cognitive-risk bg-cognitive-risk/10 shadow-[0_0_20px_rgba(239,68,68,0.15)]"
+                    : "border-border/50 bg-card/50 hover:border-cognitive-risk/40"
+                }`}
+              >
+                {quizMode === "emergency" && (
+                  <div className="absolute inset-0 bg-gradient-to-br from-cognitive-risk/5 to-transparent pointer-events-none" />
+                )}
+                <div className="flex items-center gap-3 mb-3 relative">
+                  <div className="p-2 rounded-lg bg-cognitive-risk/10">
+                    <Zap className="w-6 h-6 text-cognitive-risk" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-foreground flex items-center gap-2">
+                      Emergency Mode
+                      <Badge variant="outline" className="text-[9px] bg-cognitive-risk/10 text-cognitive-risk border-cognitive-risk/30">NEW</Badge>
+                    </div>
+                    <div className="text-xs text-muted-foreground">Rapid Revision</div>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground relative">
+                  Exam in 2 hours? AI generates key concept flashcards — mark "Got it" or "Don't understand" for instant detailed explanations.
+                </p>
+              </button>
             </div>
           </CardContent>
         </Card>
@@ -736,15 +765,28 @@ export default function QuizMe() {
 
             <div className="mt-6 flex items-center justify-between">
               <p className="text-sm text-muted-foreground">
-                {selectedTopicIds.length} topic{selectedTopicIds.length !== 1 ? "s" : ""} selected · {quizMode === "ask" ? "Ask" : quizMode === "test" ? "Quiz" : "Practice"} Mode
+                {selectedTopicIds.length} topic{selectedTopicIds.length !== 1 ? "s" : ""} selected · {quizMode === "ask" ? "Ask" : quizMode === "test" ? "Quiz" : quizMode === "emergency" ? "Emergency" : "Practice"} Mode
               </p>
               <Button onClick={startQuiz} disabled={selectedTopicIds.length === 0} className="gap-2">
-                Start {quizMode === "ask" ? "Conversation" : quizMode === "test" ? "Quiz" : "Practice"} <ChevronRight className="w-4 h-4" />
+                Start {quizMode === "ask" ? "Conversation" : quizMode === "test" ? "Quiz" : quizMode === "emergency" ? "Emergency" : "Practice"} <ChevronRight className="w-4 h-4" />
               </Button>
             </div>
           </CardContent>
         </Card>
       </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // RENDER: EMERGENCY MODE — Rapid flashcard revision
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (quizState === "quiz" && quizMode === "emergency") {
+    return (
+      <EmergencyMode
+        topicId={selectedTopicIds[0] ?? ""}
+        topicName={selectedTopicName}
+        onBack={() => setQuizState("select")}
+      />
     );
   }
 
