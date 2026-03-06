@@ -157,3 +157,43 @@ export async function assessQuizAnswer(
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Emergency Mode — Generate flashcards with key concepts for rapid revision
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface EmergencyFlashcard {
+  id: string;
+  /** Concept / theorem / key idea title */
+  title: string;
+  /** Front of card — a question or title about the concept */
+  front: string;
+  /** Back of card — brief explanation or intuition */
+  back: string;
+  /** Full detailed explanation shown when user clicks "Explain" —
+   *  uses **bold** markdown for key terms */
+  detailedExplanation: string;
+  /** Importance tag */
+  importance: "critical" | "important" | "supplementary";
+  /** Category: theorem, concept, formula, intuition, definition */
+  category: string;
+}
+
+/** Generate emergency flashcards for rapid pre-exam revision */
+export async function generateEmergencyFlashcards(
+  topic: string,
+  numCards = 10,
+  materialsContext?: string,
+): Promise<{ topic: string; flashcards: EmergencyFlashcard[] }> {
+  const res = await fetch(`${API_BASE}/quiz/emergency-flashcards`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      topic,
+      num_cards: numCards,
+      materials_context: materialsContext || null,
+    }),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}

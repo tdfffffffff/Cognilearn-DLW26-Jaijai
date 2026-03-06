@@ -63,15 +63,30 @@ const FatigueStreamContext = createContext<FatigueStreamContextValue>({
 });
 
 export function FatigueStreamProvider({ children }: { children: ReactNode }) {
-  const { handleFatigueUpdate } = useWorkBreakCoach();
+  const { handleFatigueUpdate, resetSession } = useWorkBreakCoach();
   const [livePayload, setLivePayload] = useState<FatiguePayload | null>(null);
   const [history, setHistory] = useState<FatigueHistoryPoint[]>([]);
   const sessionStartRef = useRef<number | null>(null);
-  const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [cameraEnabled, setCameraEnabledRaw] = useState(false);
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const [faceDetected, setFaceDetected] = useState(false);
   const [isMonitorInitializing, setIsMonitorInitializing] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
+
+  // Wrap setCameraEnabled: when camera is disabled, reset session data
+  // (history, livePayload, sessionStart). Fatigue insights (fatigueAnalytics) is NOT touched.
+  const setCameraEnabled = useCallback((enabled: boolean) => {
+    setCameraEnabledRaw(enabled);
+    if (!enabled) {
+      // End of study session — clear live session data
+      setLivePayload(null);
+      setHistory([]);
+      sessionStartRef.current = null;
+      setFaceDetected(false);
+      // Reset WorkBreakCoach focus timer & state
+      resetSession();
+    }
+  }, [resetSession]);
 
   const handleMonitorUpdate = useCallback(
     (payload: FatiguePayload) => {

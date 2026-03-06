@@ -57,7 +57,7 @@ from .privacy import (
 )
 from .report import generate_daily_report
 from .schemas import StudentDashboard
-from .voice import analyse_voice_session, analyse_understanding, generate_quiz_from_materials, chat_with_tutor, assess_quiz_answer, generate_quiz_questions
+from .voice import analyse_voice_session, analyse_understanding, generate_quiz_from_materials, chat_with_tutor, assess_quiz_answer, generate_quiz_questions, generate_emergency_flashcards
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -272,6 +272,22 @@ async def quiz_assess_answer(
         materials_context=materials_context,
     )
     return result
+
+
+@app.post("/quiz/emergency-flashcards",
+          summary="Generate emergency revision flashcards for rapid pre-exam study")
+async def emergency_flashcards(
+    topic: str = Body(..., embed=True),
+    num_cards: int = Body(10, embed=True),
+    materials_context: Optional[str] = Body(None, embed=True),
+):
+    """Generate AI-powered emergency flashcards for rapid revision.
+
+    Each card has a short concept title (front) and full explanation (back),
+    plus a detailed explanation for the 'Explain' button.
+    """
+    cards = generate_emergency_flashcards(topic, num_cards, materials_context)
+    return {"topic": topic, "flashcards": cards}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

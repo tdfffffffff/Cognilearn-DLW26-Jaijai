@@ -52,6 +52,8 @@ interface WorkBreakCoachContextValue {
   updateProfile: (partial: Partial<WorkBreakProfile>) => void;
   /** Reset profile to defaults */
   resetProfile: () => void;
+  /** Reset the current session (camera off = session end) */
+  resetSession: () => void;
 }
 
 const defaultSnapshot: CoachSnapshot = {
@@ -84,6 +86,7 @@ const WorkBreakCoachContext = createContext<WorkBreakCoachContextValue>({
   endBreak: () => {},
   updateProfile: () => {},
   resetProfile: () => {},
+  resetSession: () => {},
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -116,6 +119,7 @@ export function WorkBreakCoachProvider({ children }: { children: ReactNode }) {
     [coach],
   );
   const resetProfile = useCallback(() => coach.resetProfile(), [coach]);
+  const resetSession = useCallback(() => coach.resetSession(), [coach]);
 
   return (
     <WorkBreakCoachContext.Provider
@@ -128,6 +132,7 @@ export function WorkBreakCoachProvider({ children }: { children: ReactNode }) {
         endBreak,
         updateProfile,
         resetProfile,
+        resetSession,
       }}
     >
       {children}

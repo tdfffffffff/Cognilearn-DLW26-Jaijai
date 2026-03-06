@@ -483,3 +483,98 @@ def _generate_feedback(
         f"Missing foundational concepts: {', '.join(missing[:4])}. "
         f"Recommend a structured re-study of this topic before attempting practice problems."
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Emergency Flashcard Generation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def generate_emergency_flashcards(
+    topic: str,
+    num_cards: int = 10,
+    materials_context: str | None = None,
+) -> list[dict]:
+    """Generate emergency revision flashcards using OpenAI.
+
+    Each flashcard has:
+      - title: Short concept name label
+      - front: A question or title about the concept (shown on front of card)
+      - back: Brief explanation / intuition (shown on back of card)
+      - detailedExplanation: Full detailed explanation for "Explain" button
+      - importance: critical / important / supplementary
+      - category: theorem / concept / formula / intuition / definition
+    """
+    client = _get_openai_client()
+
+    system_prompt = f"""You are an expert tutor creating emergency revision flashcards for the topic: "{topic}".
+
+The student has an exam very soon and needs to quickly review the most important concepts.
+
+Create exactly {num_cards} flashcards. For each flashcard provide:
+- "title": A SHORT concept name (2-6 words), e.g. "Eigenvalues & Eigenvectors", "Chain Rule", "Bayes' Theorem"
+- "front": A question or prompt about the concept that tests the student's recall, e.g. "What is the Chain Rule and when do you use it?", "State Bayes' Theorem and explain each term." This MUST be different from the title — it should be a question or challenge.
+- "back": A BRIEF explanation or intuition (2-3 sentences) that helps the student understand the concept. This is the quick answer. Use LaTeX ($...$) for math.
+- "detailedExplanation": A FULL, detailed explanation (5-10 sentences) with **bold** markdown for key terms. Include worked examples, common mistakes to avoid, and deeper intuition. This is shown when the student clicks "Explain".
+- "importance": "critical" (must know), "important" (good to know), or "supplementary" (nice to know)
+- "category": one of "theorem", "concept", "formula", "intuition", "definition"
+
+{f'Use these study materials as reference: {materials_context}' if materials_context else ''}
+
+IMPORTANT RULES:
+1. "front" must be a QUESTION or PROMPT — NOT the same as "title"
+2. "back" must be a BRIEF answer (2-3 sentences) — NOT a full explanation
+3. "detailedExplanation" is the FULL detailed explanation — much longer than "back"
+4. Order cards by importance (critical first)
+
+Respond in this exact JSON format:
+{{
+  "flashcards": [
+    {{
+      "title": "Chain Rule",
+      "front": "What is the Chain Rule and how do you apply it to composite functions?",
+      "back": "The Chain Rule states that the derivative of $f(g(x))$ is $f'(g(x)) \\cdot g'(x)$. Think of it as peeling an onion — differentiate the outer layer, then multiply by the derivative of the inner layer.",
+      "detailedExplanation": "The **Chain Rule** is used when differentiating **composite functions**...",
+      "importance": "critical",
+      "category": "formula"
+    }}
+  ]
+}}"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Generate {num_cards} emergency flashcards for: {topic}"},
+            ],
+            temperature=0.5,
+            response_format={"type": "json_object"},
+        )
+
+        result = json.loads(response.choices[0].message.content)
+        cards = result.get("flashcards", [])
+
+        # Normalise and add IDs
+        for i, card in enumerate(cards):
+            card["id"] = f"fc-{i+1}"
+            # Ensure front exists; fall back to title if AI didn't provide it
+            if not card.get("front") or card["front"] == card.get("title"):
+                card["front"] = f"What is {card.get('title', f'Concept {i+1}')} and why does it matter?"
+            card.setdefault("importance", "important")
+            card.setdefault("category", "concept")
+
+        return cards
+
+    except Exception as e:
+        # Return a minimal fallback set
+        return [
+            {
+                "id": "fc-err-1",
+                "title": f"Key Concept in {topic}",
+                "front": f"What is the most important concept in {topic}?",
+                "back": f"Review the core definitions and theorems of {topic}.",
+                "detailedExplanation": f"Could not generate flashcards: {str(e)}. Review your notes for {topic}.",
+                "importance": "critical",
+                "category": "concept",
+            }
+        ]
