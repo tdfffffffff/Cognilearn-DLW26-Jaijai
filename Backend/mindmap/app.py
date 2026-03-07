@@ -57,7 +57,7 @@ from .privacy import (
 )
 from .report import generate_daily_report
 from .schemas import StudentDashboard
-from .voice import analyse_voice_session, analyse_understanding, generate_quiz_from_materials, chat_with_tutor, assess_quiz_answer, generate_quiz_questions, generate_emergency_flashcards
+from .voice import analyse_voice_session, analyse_understanding, generate_quiz_from_materials, chat_with_tutor, assess_quiz_answer, generate_quiz_questions, generate_emergency_flashcards, analyze_test_paper
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -384,6 +384,30 @@ async def health():
             "eye_tracking_attention",
             "daily_report",
             "privacy_management",
+            "error_diagnosis",
         ],
         "agents": ["diagnosis", "planner", "evaluator", "intervention"],
     }
+
+
+@app.post("/diagnosis/analyze-image",
+          summary="Analyze a test paper or wrong questions image for error diagnosis")
+async def diagnosis_analyze_image(
+    image_base64: str = Body(..., embed=True),
+    topic: str = Body(..., embed=True),
+    context: Optional[str] = Body(None, embed=True),
+):
+    """Analyze an uploaded image of a test paper or wrong questions.
+
+    Uses OpenAI GPT-4o-mini Vision to:
+    - Identify all questions in the image
+    - Determine correctness of each answer
+    - Classify errors into 6 cognitive categories
+    - Generate aggregate error profile and study recommendations
+    """
+    result = analyze_test_paper(
+        image_base64=image_base64,
+        topic=topic,
+        context=context,
+    )
+    return result
