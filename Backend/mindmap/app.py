@@ -212,9 +212,10 @@ async def generate_quiz(
     topic: str = Body(..., embed=True),
     materials_text: str = Body(..., embed=True),
     num_questions: int = Body(5, embed=True),
+    difficulty: Optional[str] = Body(None, embed=True),
 ):
     """Generate conceptual quiz questions from uploaded study materials, with source references."""
-    questions = generate_quiz_from_materials(topic, materials_text, num_questions)
+    questions = generate_quiz_from_materials(topic, materials_text, num_questions, difficulty)
     return {"topic": topic, "questions": questions}
 
 
@@ -241,9 +242,10 @@ async def generate_questions(
     topic: str = Body(..., embed=True),
     num_questions: int = Body(5, embed=True),
     materials_context: Optional[str] = Body(None, embed=True),
+    difficulty: Optional[str] = Body(None, embed=True),
 ):
     """Generate AI-powered quiz questions with LaTeX math content."""
-    questions = generate_quiz_questions(topic, num_questions, materials_context)
+    questions = generate_quiz_questions(topic, num_questions, materials_context, difficulty)
     return {"topic": topic, "questions": questions}
 
 

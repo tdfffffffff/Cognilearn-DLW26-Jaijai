@@ -74,6 +74,14 @@ class InterventionType(str, Enum):
     SPACED_RETRIEVAL = "spaced_retrieval"
 
 
+class ConfidenceTier(str, Enum):
+    """Data-quality badge derived from predict_proba + interaction count."""
+    PROVISIONAL = "provisional"    # 🔴 < 10 interactions
+    UNCERTAIN = "uncertain"        # 🟡 proba < 0.55, poor fit
+    DEVELOPING = "developing"      # 🟠 proba < 0.75 or < 40 interactions
+    RELIABLE = "reliable"          # 🟢 proba ≥ 0.75 with 40+ interactions
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Feature 1 — Error Classification
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -89,6 +97,18 @@ class ErrorDiagnosis(BaseModel):
     features: dict[str, float] = Field(default_factory=dict,
                                         description="Feature values used")
     intervention_type: InterventionType
+    confidence_tier: ConfidenceTier = Field(
+        ConfidenceTier.PROVISIONAL,
+        description="Data-quality tier: provisional / uncertain / developing / reliable",
+    )
+    is_ood: bool = Field(
+        False,
+        description="True if student behaviour is out-of-distribution (unusual pattern)",
+    )
+    ood_reason: str = Field(
+        "",
+        description="Plain-English reason when is_ood is True",
+    )
 
 
 class ErrorProfile(BaseModel):

@@ -26,11 +26,44 @@ import { getMaterialsForTopic } from "@/data/topicStore";
 import { updateErrorProfile } from "@/data/errorProfileStore";
 import { LatexRenderer } from "@/components/LatexRenderer";
 import EmergencyMode from "@/components/EmergencyMode";
+import { getQuestions } from "@/data/questionBank";
 
 type QuizState = "select" | "quiz" | "review" | "report";
 type QuizMode = "ask" | "practice" | "test" | "emergency";
+type DifficultyLevel = "easy" | "medium" | "hard" | "even_harder";
 /** Practice sub-mode: pick a generated question or free-explain "teach-me" style */
 type PracticeView = "menu" | "question" | "teach";
+
+const DIFFICULTY_CONFIG: Record<DifficultyLevel, { label: string; emoji: string; color: string; bgColor: string; description: string }> = {
+  easy: {
+    label: "Easy",
+    emoji: "🟢",
+    color: "text-emerald-400",
+    bgColor: "border-emerald-500/40 bg-emerald-500/10",
+    description: "Foundational concepts & recall",
+  },
+  medium: {
+    label: "Medium",
+    emoji: "🟡",
+    color: "text-yellow-400",
+    bgColor: "border-yellow-500/40 bg-yellow-500/10",
+    description: "Apply understanding to problems",
+  },
+  hard: {
+    label: "Hard",
+    emoji: "🔴",
+    color: "text-red-400",
+    bgColor: "border-red-500/40 bg-red-500/10",
+    description: "Multi-step & analytical challenges",
+  },
+  even_harder: {
+    label: "Even Harder",
+    emoji: "💀",
+    color: "text-purple-400",
+    bgColor: "border-purple-500/40 bg-purple-500/10",
+    description: "Olympiad-level & creative problems",
+  },
+};
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -103,6 +136,7 @@ export default function QuizMe() {
   const [quizState, setQuizState] = useState<QuizState>("select");
   const [quizMode, setQuizMode] = useState<QuizMode>("practice");
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([]);
+  const [difficulty, setDifficulty] = useState<DifficultyLevel>("medium");
 
   // ── Standard quiz state (for flashcard/working/open-ended) ──
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -258,15 +292,31 @@ export default function QuizMe() {
     const selectedTopic = topics.find((t) => selectedTopicIds.includes(t.id));
     if (!selectedTopic) { setTestGenerating(false); return; }
 
+    // 1. Try the local question bank first (instant, no API call)
+    const localQuestions = getQuestions(selectedTopic.id, difficulty, 5);
+    if (localQuestions.length >= 3) {
+      setTestQuestions(localQuestions.map((q) => ({
+        id: q.id,
+        question: q.question,
+        correct_answer: q.correct_answer,
+        difficulty: q.difficulty,
+        hints: q.hints,
+        topic_area: q.topic_area,
+      })));
+      setTestGenerating(false);
+      return;
+    }
+
+    // 2. Fallback: call AI to generate questions
     const materials = getMaterialsForTopic(selectedTopic.id);
     try {
-      const result = await generateQuizQuestions(selectedTopic.topic, 5, materials || undefined);
+      const result = await generateQuizQuestions(selectedTopic.topic, 5, materials || undefined, difficulty);
       setTestQuestions(result.questions);
     } catch {
       setTestQuestions([
-        { id: "q1", question: `Solve a key problem in ${selectedTopic.topic}`, correct_answer: "", difficulty: "medium", hints: [], topic_area: selectedTopic.topic },
-        { id: "q2", question: `Explain the fundamental theorem related to ${selectedTopic.topic}`, correct_answer: "", difficulty: "medium", hints: [], topic_area: selectedTopic.topic },
-        { id: "q3", question: `Derive the formula for a concept in ${selectedTopic.topic}`, correct_answer: "", difficulty: "hard", hints: [], topic_area: selectedTopic.topic },
+        { id: "q1", question: `Solve a key problem in ${selectedTopic.topic}`, correct_answer: "", difficulty, hints: [], topic_area: selectedTopic.topic },
+        { id: "q2", question: `Explain the fundamental theorem related to ${selectedTopic.topic}`, correct_answer: "", difficulty, hints: [], topic_area: selectedTopic.topic },
+        { id: "q3", question: `Derive the formula for a concept in ${selectedTopic.topic}`, correct_answer: "", difficulty, hints: [], topic_area: selectedTopic.topic },
       ]);
     }
     setTestGenerating(false);
@@ -729,6 +779,41 @@ export default function QuizMe() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Difficulty Selection — Quiz Mode only */}
+        {quizMode === "test" && (
+          <Card className="glass border-border/50">
+            <CardHeader>
+              <CardTitle className="text-lg">Choose Difficulty</CardTitle>
+              <CardDescription>AI will generate questions at this level</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {(Object.entries(DIFFICULTY_CONFIG) as [DifficultyLevel, typeof DIFFICULTY_CONFIG[DifficultyLevel]][]).map(([key, cfg]) => (
+                  <button
+                    key={key}
+                    onClick={() => setDifficulty(key)}
+                    className={`p-4 rounded-lg border text-left transition-all duration-200 ${
+                      difficulty === key
+                        ? `${cfg.bgColor} glow-primary`
+                        : "border-border/50 bg-card/50 hover:border-primary/40"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-lg">{cfg.emoji}</span>
+                      <span className={`font-semibold text-sm ${difficulty === key ? cfg.color : "text-foreground"}`}>
+                        {cfg.label}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {cfg.description}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Topic/Discipline Selection */}
         <Card className="glass border-border/50">

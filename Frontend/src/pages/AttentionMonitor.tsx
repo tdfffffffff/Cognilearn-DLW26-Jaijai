@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   XAxis,
@@ -89,11 +89,24 @@ const AttentionMonitor = () => {
     ? { label: "Getting Tired", color: "text-cognitive-moderate", bg: "bg-cognitive-moderate/10 border-cognitive-moderate/30", Icon: EyeOff }
     : { label: "OK \u2014 Focused", color: "text-cognitive-good", bg: "bg-cognitive-good/10 border-cognitive-good/30", Icon: Eye };
 
-  const elapsed = () => {
+  // ── 1-second tick for live elapsed counters ──
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const elapsed = useCallback(() => {
     if (!sessionStartTs) return "0m 0s";
     const s = Math.floor((Date.now() - sessionStartTs) / 1000);
     return formatElapsed(s);
-  };
+  }, [sessionStartTs]);
+
+  // Live focus elapsed computed from focusStartTime (not stale snapshot)
+  const liveFocusElapsedMin =
+    snapshot.state !== "BREAK_ACTIVE"
+      ? (Date.now() - snapshot.focusStartTime) / 60_000
+      : 0;
 
   const peakFatiguePoint =
     history.length > 0
@@ -343,7 +356,7 @@ const AttentionMonitor = () => {
               {stateLabel[snapshot.state] ?? snapshot.state}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              Focus elapsed: {snapshot.focusElapsedMin.toFixed(1)} min
+              Focus elapsed: {liveFocusElapsedMin.toFixed(1)} min
             </p>
           </motion.div>
 

@@ -25,7 +25,7 @@ export interface VoiceAnalysisResult {
 export interface GeneratedQuestion {
   question: string;
   answer: string;
-  difficulty: "easy" | "medium" | "hard";
+  difficulty: "easy" | "medium" | "hard" | "even_harder";
   source_reference: string;
   related_concepts: string[];
   hints: string[];
@@ -51,11 +51,12 @@ export async function generateQuizFromMaterials(
   topic: string,
   materialsText: string,
   numQuestions = 5,
+  difficulty?: string,
 ): Promise<{ topic: string; questions: GeneratedQuestion[] }> {
   const res = await fetch(`${API_BASE}/quiz/generate-from-materials`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ topic, materials_text: materialsText, num_questions: numQuestions }),
+    body: JSON.stringify({ topic, materials_text: materialsText, num_questions: numQuestions, difficulty: difficulty || null }),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -111,7 +112,7 @@ export interface QuizQuestionGenerated {
   id: string;
   question: string;
   correct_answer: string;
-  difficulty: "easy" | "medium" | "hard";
+  difficulty: "easy" | "medium" | "hard" | "even_harder";
   hints: string[];
   topic_area: string;
 }
@@ -121,6 +122,7 @@ export async function generateQuizQuestions(
   topic: string,
   numQuestions = 5,
   materialsContext?: string,
+  difficulty?: string,
 ): Promise<{ topic: string; questions: QuizQuestionGenerated[] }> {
   const res = await fetch(`${API_BASE}/quiz/generate-questions`, {
     method: "POST",
@@ -129,6 +131,7 @@ export async function generateQuizQuestions(
       topic,
       num_questions: numQuestions,
       materials_context: materialsContext || null,
+      difficulty: difficulty || null,
     }),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
