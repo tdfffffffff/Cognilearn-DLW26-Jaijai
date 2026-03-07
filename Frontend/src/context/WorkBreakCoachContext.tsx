@@ -62,6 +62,7 @@ const defaultSnapshot: CoachSnapshot = {
   showAlert: false,
   alertMessage: "",
   focusElapsedMin: 0,
+  focusStartTime: Date.now(),
   breakRemainingMin: 0,
   profile: {
     preferredFocusMin: 25,

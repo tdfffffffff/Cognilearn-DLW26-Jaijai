@@ -42,6 +42,8 @@ export interface CoachSnapshot {
   showAlert: boolean;
   alertMessage: string;
   focusElapsedMin: number;
+  /** Timestamp (ms) when the current focus session started — use for live elapsed computation */
+  focusStartTime: number;
   breakRemainingMin: number;
   profile: WorkBreakProfile;
   latestFatigue: number;
@@ -188,6 +190,7 @@ export class WorkBreakCoach {
       showAlert: this._showAlert,
       alertMessage: this._alertMessage,
       focusElapsedMin,
+      focusStartTime: this.focusStartTime,
       breakRemainingMin,
       profile: { ...this.profile },
       latestFatigue: this.latestFatigue,

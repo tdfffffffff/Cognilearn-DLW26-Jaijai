@@ -195,14 +195,27 @@ def generate_quiz_from_materials(
     topic: str,
     materials_text: str,
     num_questions: int = 5,
+    difficulty: str | None = None,
 ) -> list[dict]:
     """Generate quiz questions from uploaded study materials using OpenAI."""
     client = _get_openai_client()
 
+    difficulty_instruction = ""
+    if difficulty:
+        difficulty_labels = {
+            "easy": "Easy — focus on basic recall, definitions, and simple applications.",
+            "medium": "Medium — require applying concepts to solve straightforward problems.",
+            "hard": "Hard — multi-step problems requiring analysis and synthesis of multiple concepts.",
+            "even_harder": "Even Harder (Olympiad-level) — extremely challenging, creative, proof-based, or competition-style problems that push mastery to the limit. These should make even advanced students think hard.",
+        }
+        diff_desc = difficulty_labels.get(difficulty, difficulty)
+        difficulty_instruction = f"\nIMPORTANT: ALL questions MUST be at this difficulty level: {diff_desc}\nEvery single question must be \"{difficulty}\" difficulty — do NOT include any other difficulty level.\nSet the difficulty field to \"{difficulty}\" for ALL questions without exception.\n"
+
+    diff_field = f'"{difficulty}"' if difficulty else '"easy" | "medium" | "hard" | "even_harder"'
     system_prompt = f"""You are an expert tutor creating quiz questions for the topic: "{topic}".
 Based on the provided study materials, generate {num_questions} conceptual questions.
 Each question should test deep understanding, not just memorization.
-
+{difficulty_instruction}
 For each question, also note which part of the source material it references.
 
 Respond in this exact JSON format:
@@ -211,7 +224,7 @@ Respond in this exact JSON format:
     {{
       "question": "the question text",
       "answer": "the model answer",
-      "difficulty": "easy" | "medium" | "hard",
+      "difficulty": {diff_field},
       "source_reference": "the relevant excerpt from the materials",
       "related_concepts": ["concept1", "concept2"],
       "hints": ["hint1"]
@@ -230,9 +243,14 @@ Respond in this exact JSON format:
             response_format={"type": "json_object"},
         )
         result = json.loads(response.choices[0].message.content)
-        return result.get("questions", [])
+        questions = result.get("questions", [])
+        # Force-overwrite difficulty on every question to guarantee consistency
+        if difficulty:
+            for q in questions:
+                q["difficulty"] = difficulty
+        return questions
     except Exception as e:
-        return [{"question": f"Error generating questions: {e}", "answer": "", "difficulty": "medium",
+        return [{"question": f"Error generating questions: {e}", "answer": "", "difficulty": difficulty or "medium",
                  "source_reference": "", "related_concepts": [], "hints": []}]
 
 
@@ -399,6 +417,7 @@ def generate_quiz_questions(
     topic: str,
     num_questions: int = 5,
     materials_context: str | None = None,
+    difficulty: str | None = None,
 ) -> list[dict]:
     """Generate text-based quiz questions for a given topic.
 
@@ -408,10 +427,22 @@ def generate_quiz_questions(
     """
     client = _get_openai_client()
 
+    difficulty_instruction = ""
+    if difficulty:
+        difficulty_labels = {
+            "easy": "Easy — focus on basic recall, definitions, and straightforward computations.",
+            "medium": "Medium — apply concepts to solve problems with some reasoning.",
+            "hard": "Hard — multi-step analytical problems requiring deep understanding and synthesis.",
+            "even_harder": "Even Harder (Olympiad-level) — extremely challenging, creative, proof-based, or competition-style problems. Require novel insights, elegant reasoning, or advanced techniques beyond standard curriculum.",
+        }
+        diff_desc = difficulty_labels.get(difficulty, difficulty)
+        difficulty_instruction = f"\nIMPORTANT: ALL questions MUST be at this difficulty level: {diff_desc}\nEvery single question must be \"{difficulty}\" difficulty — do NOT include any other difficulty level.\nSet the difficulty field to \"{difficulty}\" for ALL questions without exception.\n"
+
+    diff_field = f'"{difficulty}"' if difficulty else '"easy" | "medium" | "hard" | "even_harder"'
     system_prompt = f"""You are an expert mathematics tutor creating quiz questions for: "{topic}".
 Generate {num_questions} questions that test deep understanding.
 Use LaTeX notation for ALL mathematical content (wrap inline math in $...$ and display math in $$...$$).
-Include a mix of difficulty levels.
+{difficulty_instruction if difficulty else 'Include a mix of difficulty levels.'}
 
 {f'Optional reference materials: {materials_context}' if materials_context else 'Generate questions based on your knowledge of this topic.'}
 
@@ -422,7 +453,7 @@ Respond in this exact JSON format:
       "id": "q1",
       "question": "question text with $LaTeX$ math",
       "correct_answer": "correct answer with $LaTeX$",
-      "difficulty": "easy" | "medium" | "hard",
+      "difficulty": {diff_field},
       "hints": ["hint1 with $LaTeX$"],
       "topic_area": "specific sub-topic"
     }}
@@ -440,10 +471,15 @@ Respond in this exact JSON format:
             response_format={"type": "json_object"},
         )
         result = json.loads(response.choices[0].message.content)
-        return result.get("questions", [])
+        questions = result.get("questions", [])
+        # Force-overwrite difficulty on every question to guarantee consistency
+        if difficulty:
+            for q in questions:
+                q["difficulty"] = difficulty
+        return questions
     except Exception as e:
         return [{"id": "q1", "question": f"Error generating questions: {e}",
-                 "correct_answer": "", "difficulty": "medium", "hints": [], "topic_area": topic}]
+                 "correct_answer": "", "difficulty": difficulty or "medium", "hints": [], "topic_area": topic}]
 
 
 def _extract_keywords(transcript: str, topic_id: str) -> list[str]:

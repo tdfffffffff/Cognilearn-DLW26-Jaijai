@@ -26,6 +26,7 @@ except ImportError:
     _HAS_XGBOOST = False
 
 from .schemas import (
+    ConfidenceTier,
     ErrorDiagnosis,
     ErrorProfile,
     ErrorSubType,
@@ -208,6 +209,76 @@ _INTERVENTION_MAP: dict[tuple[ErrorType, ErrorSubType], InterventionType] = {
 def _get_intervention(et: ErrorType, sub: ErrorSubType) -> InterventionType:
     return _INTERVENTION_MAP.get((et, sub), InterventionType.CONCEPT_EXPLANATION)
 
+# ── Confidence tier computation ───────────────────────────────────────
+
+def _compute_confidence_tier(proba: float, attempt_count: int) -> ConfidenceTier:
+    """Derive a human-readable data-quality tier.
+
+    Tiers:
+      🔴 Provisional  — < 10 interactions (too little data to trust)
+      🟡 Uncertain    — proba < 0.55 (pattern doesn’t fit trained profiles)
+      🟠 Developing   — proba < 0.75 *or* < 40 interactions
+      🟢 Reliable     — proba ≥ 0.75 with 40+ interactions
+    """
+    if attempt_count < 10:
+        return ConfidenceTier.PROVISIONAL
+    if proba < 0.55:
+        return ConfidenceTier.UNCERTAIN
+    if proba < 0.75 or attempt_count < 40:
+        return ConfidenceTier.DEVELOPING
+    return ConfidenceTier.RELIABLE
+
+
+# ── Out-of-distribution (OOD) detection ──────────────────────────────
+
+def _detect_ood(features: dict[str, float],
+               all_features: list[dict[str, float]],
+               proba: float) -> tuple[bool, str]:
+    """Flag behaviour that doesn’t match any trained profile.
+
+    Uses two complementary signals:
+      1. Max probability < 0.35 — XGBoost can’t confidently pick any class.
+      2. Mahalanobis-style z-score — feature vector is far from training mean.
+
+    Returns (is_ood, reason).
+    """
+    # Signal 1: classifier indecision
+    if proba < 0.35:
+        return True, (
+            "Unusual pattern — the classifier could not confidently match "
+            "this behaviour to any known error type. We’ll flag this for "
+            "review rather than guess."
+        )
+
+    # Signal 2: feature-space outlier detection
+    if len(all_features) >= 4:
+        feat_keys = list(features.keys())
+        vec = np.array([features[k] for k in feat_keys])
+        mat = np.array([[f[k] for k in feat_keys] for f in all_features])
+        mean = mat.mean(axis=0)
+        std = mat.std(axis=0) + 1e-9  # avoid division by zero
+        z_scores = np.abs((vec - mean) / std)
+        # If more than 3 features are > 2.5 std from mean, flag OOD
+        outlier_count = int(np.sum(z_scores > 2.5))
+        if outlier_count >= 3:
+            outlier_names = [feat_keys[i] for i in range(len(feat_keys))
+                             if z_scores[i] > 2.5]
+            return True, (
+                f"Unusual pattern — {outlier_count} features are far outside "
+                f"normal ranges ({', '.join(outlier_names)}). We’ll flag this "
+                f"for review rather than guess."
+            )
+        # Also check max z-score for extreme single-feature outliers
+        max_z = float(np.max(z_scores))
+        if max_z > 4.0:
+            outlier_idx = int(np.argmax(z_scores))
+            return True, (
+                f"Unusual pattern — {feat_keys[outlier_idx]} is extremely "
+                f"far from normal (z={max_z:.1f}). We’ll flag this for "
+                f"review rather than guess."
+            )
+
+    return False, ""
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
@@ -241,11 +312,14 @@ def classify_errors(student_id: str,
     inv_label_map = {v: k for k, v in label_map.items()}
 
     for i, (tid, tname, feats, _attempts) in enumerate(topic_features):
+        attempt_count = int(feats["attempt_count"])
+
         if model is not None and explainer is not None:
             feature_names = list(feats.keys())
             X_single = np.array([[feats[k] for k in feature_names]])
             pred = int(model.predict(X_single)[0])
-            prob = float(model.predict_proba(X_single)[0][pred])
+            proba_arr = model.predict_proba(X_single)[0]
+            prob = float(proba_arr[pred])
             error_type = inv_label_map.get(pred, ErrorType.CONCEPTUAL)
 
             # SHAP explanation
@@ -266,6 +340,14 @@ def classify_errors(student_id: str,
         else:
             error_type, sub_type, prob, explanation = rule_results[i]
 
+        # Confidence tier
+        tier = _compute_confidence_tier(prob, attempt_count)
+
+        # OOD detection
+        is_ood, ood_reason = _detect_ood(feats, all_feats, prob)
+        if is_ood:
+            tier = ConfidenceTier.UNCERTAIN  # downgrade if OOD
+
         diagnoses.append(ErrorDiagnosis(
             topic_id=tid,
             topic_name=tname,
@@ -275,6 +357,9 @@ def classify_errors(student_id: str,
             shap_explanation=explanation,
             features=feats,
             intervention_type=_get_intervention(error_type, sub_type),
+            confidence_tier=tier,
+            is_ood=is_ood,
+            ood_reason=ood_reason,
         ))
 
     # Overall pattern
