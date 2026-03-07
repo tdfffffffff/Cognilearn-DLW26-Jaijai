@@ -102,9 +102,9 @@ const AttentionMonitor = () => {
     return formatElapsed(s);
   }, [sessionStartTs]);
 
-  // Live focus elapsed computed from focusStartTime (not stale snapshot)
+  // Live focus elapsed — only counts while camera is enabled
   const liveFocusElapsedMin =
-    snapshot.state !== "BREAK_ACTIVE"
+    cameraEnabled && snapshot.state !== "BREAK_ACTIVE"
       ? (Date.now() - snapshot.focusStartTime) / 60_000
       : 0;
 

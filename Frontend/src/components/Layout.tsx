@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Brain, BookOpen, Network, Eye, Shield, Activity, GraduationCap } from "lucide-react";
+import { Brain, BookOpen, Network, Eye, Shield, Activity, GraduationCap, Target } from "lucide-react";
 import { motion } from "framer-motion";
 import FatigueAlert from "@/components/FatigueAlert";
 import { useFatigueStream } from "@/context/FatigueStreamContext";
@@ -10,6 +10,7 @@ const navItems = [
   { to: "/quiz-me", icon: GraduationCap, label: "Quiz Me" },
   { to: "/knowledge-graph", icon: Network, label: "Knowledge Graph" },
   { to: "/attention", icon: Eye, label: "Attention Monitor" },
+  { to: "/error-diagnosis", icon: Target, label: "Error Diagnosis" },
   { to: "/my-data", icon: Shield, label: "My Data" },
 ];
 

@@ -11,6 +11,7 @@ import KnowledgeGraph from "./pages/KnowledgeGraph";
 import AttentionMonitor from "./pages/AttentionMonitor";
 // TeachMe is now integrated into QuizMe
 import MyData from "./pages/MyData";
+import ErrorDiagnosis from "./pages/ErrorDiagnosis";
 import NotFound from "./pages/NotFound";
 import Auth from "./pages/Auth";
 import { AuthProvider, useAuth } from "./context/AuthContext";
@@ -43,6 +44,7 @@ function AppRoutes() {
         <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
         <Route path="/attention" element={<AttentionMonitor />} />
         {/* TeachMe is now part of Quiz Me → Practice Mode */}
+        <Route path="/error-diagnosis" element={<ErrorDiagnosis />} />
         <Route path="/my-data" element={<MyData />} />
       </Route>
       <Route path="*" element={<NotFound />} />

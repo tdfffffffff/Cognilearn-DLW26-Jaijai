@@ -200,3 +200,43 @@ export async function generateEmergencyFlashcards(
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Error Diagnosis — Analyze test paper images for cognitive error profiling
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface DiagnosisQuestionFound {
+  question_text: string;
+  student_answer: string;
+  correct_answer: string;
+  is_correct: boolean;
+  score: number;
+  errors: ErrorFound[];
+  error_classifications: ErrorCategoryScore[];
+}
+
+export interface DiagnosisResult {
+  questions_found: DiagnosisQuestionFound[];
+  aggregate_error_profile: ErrorCategoryScore[];
+  overall_feedback: string;
+  study_recommendations: string[];
+}
+
+/** Analyze a test paper / wrong questions image for error diagnosis */
+export async function analyzeTestPaper(
+  imageBase64: string,
+  topic: string,
+  context?: string,
+): Promise<DiagnosisResult> {
+  const res = await fetch(`${API_BASE}/diagnosis/analyze-image`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      image_base64: imageBase64,
+      topic,
+      context: context || null,
+    }),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}

@@ -614,3 +614,137 @@ Respond in this exact JSON format:
                 "category": "concept",
             }
         ]
+
+
+def analyze_test_paper(
+    image_base64: str,
+    topic: str,
+    context: str | None = None,
+) -> dict:
+    """Analyze an image of a test paper / wrong questions using OpenAI Vision.
+
+    Identifies ALL wrong or partially-wrong questions in the image, classifies
+    errors into the 6 cognitive categories, and returns per-question analysis
+    plus an aggregate error profile.
+
+    Returns dict with: questions_found, aggregate_error_profile, overall_feedback, study_recommendations.
+    """
+    client = _get_openai_client()
+
+    system_prompt = f"""You are an expert mathematics tutor and learning diagnostician.
+The student is studying "{topic}".
+
+You are given an image of a test paper, homework, or a set of wrong questions the student made.
+Your task:
+
+1. **Identify every question** visible in the image. For each question determine if the student's
+   answer is correct, partially correct, or incorrect.
+
+2. For each question, provide:
+   - "question_text": The question as written (use LaTeX for math: $...$ inline, $$...$$ display)
+   - "student_answer": What the student wrote (use LaTeX)
+   - "correct_answer": The correct answer (use LaTeX)
+   - "is_correct": true/false
+   - "score": 0-100
+   - "errors": Array of specific errors, each with:
+     - "category": one of Conceptual, Procedural, Factual, Metacognitive, Transfer, Application
+     - "description": what went wrong (LaTeX for math)
+     - "correction": correct approach (LaTeX for math)
+   - "error_classifications": 6-category scores for THIS question
+     [{{"type": "Conceptual", "score": 0-100}}, ...]
+
+3. Provide an **aggregate_error_profile**: Average the 6 category scores across ALL questions.
+
+4. Provide **overall_feedback**: Constructive summary of the student's performance patterns.
+
+5. Provide **study_recommendations**: Array of 3-5 specific things to study/practice.
+
+{f'Additional context: {context}' if context else ''}
+
+Respond in this exact JSON format:
+{{
+  "questions_found": [
+    {{
+      "question_text": "...",
+      "student_answer": "...",
+      "correct_answer": "...",
+      "is_correct": false,
+      "score": 30,
+      "errors": [
+        {{"category": "Procedural", "description": "...", "correction": "..."}}
+      ],
+      "error_classifications": [
+        {{"type": "Conceptual", "score": 80}},
+        {{"type": "Procedural", "score": 40}},
+        {{"type": "Factual", "score": 90}},
+        {{"type": "Metacognitive", "score": 50}},
+        {{"type": "Transfer", "score": 60}},
+        {{"type": "Application", "score": 70}}
+      ]
+    }}
+  ],
+  "aggregate_error_profile": [
+    {{"type": "Conceptual", "score": 80}},
+    {{"type": "Procedural", "score": 40}},
+    {{"type": "Factual", "score": 90}},
+    {{"type": "Metacognitive", "score": 50}},
+    {{"type": "Transfer", "score": 60}},
+    {{"type": "Application", "score": 70}}
+  ],
+  "overall_feedback": "...",
+  "study_recommendations": ["...", "...", "..."]
+}}"""
+
+    user_content = [
+        {
+            "type": "text",
+            "text": "Please analyze this test paper / wrong questions image. Identify all questions, assess correctness, and classify errors.",
+        },
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"},
+        },
+    ]
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            temperature=0.3,
+            response_format={"type": "json_object"},
+            max_tokens=4000,
+        )
+        result = json.loads(response.choices[0].message.content)
+
+        # Ensure all 6 categories in aggregate
+        categories = ["Conceptual", "Procedural", "Factual", "Metacognitive", "Transfer", "Application"]
+        existing_agg = {c["type"] for c in result.get("aggregate_error_profile", [])}
+        for cat in categories:
+            if cat not in existing_agg:
+                result.setdefault("aggregate_error_profile", []).append({"type": cat, "score": 50})
+
+        # Ensure all 6 categories per question
+        for q in result.get("questions_found", []):
+            existing_q = {c["type"] for c in q.get("error_classifications", [])}
+            for cat in categories:
+                if cat not in existing_q:
+                    q.setdefault("error_classifications", []).append({"type": cat, "score": 50})
+
+        return result
+    except Exception as e:
+        return {
+            "questions_found": [],
+            "aggregate_error_profile": [
+                {"type": "Conceptual", "score": 50},
+                {"type": "Procedural", "score": 50},
+                {"type": "Factual", "score": 50},
+                {"type": "Metacognitive", "score": 50},
+                {"type": "Transfer", "score": 50},
+                {"type": "Application", "score": 50},
+            ],
+            "overall_feedback": f"Error analyzing image: {str(e)}",
+            "study_recommendations": [],
+        }

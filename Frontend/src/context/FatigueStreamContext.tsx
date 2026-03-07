@@ -73,11 +73,14 @@ export function FatigueStreamProvider({ children }: { children: ReactNode }) {
   const [isMonitorInitializing, setIsMonitorInitializing] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
 
-  // Wrap setCameraEnabled: when camera is disabled, reset session data
-  // (history, livePayload, sessionStart). Fatigue insights (fatigueAnalytics) is NOT touched.
+  // Wrap setCameraEnabled: reset session data on disable AND on enable
+  // so the focus timer always starts fresh when the camera is turned on.
   const setCameraEnabled = useCallback((enabled: boolean) => {
     setCameraEnabledRaw(enabled);
-    if (!enabled) {
+    if (enabled) {
+      // New study session — reset focus timer so it starts from 0
+      resetSession();
+    } else {
       // End of study session — clear live session data
       setLivePayload(null);
       setHistory([]);
